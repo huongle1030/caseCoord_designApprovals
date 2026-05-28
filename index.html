@@ -385,6 +385,7 @@
   .reason-chip.missing_info { background: #FEF3C7; color: var(--gold); }
   .reason-chip.waiting_on_parts { background: var(--slate-light); color: var(--slate); }
   .reason-chip.design_modification { background: var(--pale); color: var(--navy); }
+  .reason-chip.reschedule_check { background: #FCE7F3; color: #9D174D; }
 
   .conf-bar {
     height: 5px; width: 80px; background: var(--slate-light);
@@ -1856,7 +1857,7 @@
   /* Submit Request form */
   .form-card {
     background: var(--white); border: 1px solid var(--slate-light);
-    border-radius: 6px; padding: 24px; max-width: 760px;
+    border-radius: 6px; padding: 24px;
   }
   .form-row { margin-bottom: 16px; }
   .form-row label {
@@ -2798,6 +2799,7 @@
   .reason-chip.missing_info { background: #FEF3C7; color: #92400E; border-color: #FDE68A; }
   .reason-chip.waiting_on_parts { background: #F1F5F9; color: #334155; border-color: #CBD5E1; }
   .reason-chip.design_modification { background: #DBEAFE; color: #1E3A8A; border-color: #BFDBFE; }
+  .reason-chip.reschedule_check { background: #FCE7F3; color: #9D174D; border-color: #FBCFE8; }
 
   /* Activity chips */
   .activity-chip.reply  { background: #FEE4E4; color: #B91C1C; border-color: #FBC7C7; }
@@ -3046,6 +3048,8 @@
       <button type="button" class="appbar-link" onclick="openCallNotes()">Log Call</button>
       <span class="appbar-sep" aria-hidden="true">|</span>
       <button type="button" class="appbar-link" onclick="loadAll()">Refresh Page</button>
+      <span class="appbar-sep" aria-hidden="true">|</span>
+      <button type="button" class="appbar-link" onclick="authSignOut()">Sign Out</button>
     </div>
     <div class="appbar-status">
       <span class="appbar-status-gate" id="gateStatus">All sends gated</span>
