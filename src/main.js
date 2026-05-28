@@ -2,7 +2,7 @@
 // Auth (Microsoft SSO via Supabase) — gates the entire app boot
 // =====================================================================
 import './auth.css';
-import { initAuth, getCurrentEmployee, signOut as authSignOut } from './auth.js';
+import { initAuth, getCurrentEmployee, signOut as authSignOut, getAccessToken } from './auth.js';
 
 // =====================================================================
 // Configuration
@@ -1821,32 +1821,29 @@ async function markReplyNoCase(replyId) {
 function stripDashes(s) { return (s || '').replace(/–/g, '-').replace(/—/g, '-'); }
 
 async function callAnthropic(prompt, maxTokens) {
-  const cfg = getConfig();
-  if (!cfg.anthropic) {
-    toast('Auto Resummarize is not configured. Open Config to add credentials.', 'err');
-    openConfig();
-    throw new Error('Credentials not configured');
+  // Calls our own serverless proxy (/api/anthropic) rather than Anthropic
+  // directly, so the API key stays server-side and never reaches the browser.
+  // The proxy verifies the caller's Supabase session before using the key.
+  const token = await getAccessToken();
+  if (!token) {
+    toast('Please sign in again to use AI features.', 'err');
+    throw new Error('Not authenticated');
   }
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  const res = await fetch('/api/anthropic', {
     method: 'POST',
     headers: {
-      'x-api-key': cfg.anthropic,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
+      'Authorization': 'Bearer ' + token,
       'content-type': 'application/json'
     },
-    body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: maxTokens || 1000,
-      messages: [{ role: 'user', content: prompt }]
-    })
+    body: JSON.stringify({ prompt, maxTokens: maxTokens || 1000 })
   });
   if (!res.ok) {
-    const t = await res.text();
-    throw new Error('Service ' + res.status + ': ' + t.slice(0, 200));
+    let detail = '';
+    try { detail = (await res.json()).error || ''; } catch { detail = await res.text(); }
+    throw new Error('Service ' + res.status + ': ' + String(detail).slice(0, 200));
   }
   const j = await res.json();
-  return j.content?.[0]?.text || '';
+  return j.text || j.content?.[0]?.text || '';
 }
 
 function parseJsonish(s) {
@@ -2063,7 +2060,7 @@ function closeSettings() {
 let currentMode = localStorage.getItem('skdla_mode') || 'outreach';
 
 const OUTREACH_PANELS = ['outbound','ready','inbound','audit','lookup','submit','reschedule','editlog','feedback'];
-const CC_PANELS       = ['cc-dashboard','cc-newlog','cc-history','cc-tracker','cc-coordinators','cc-prefs'];
+const CC_PANELS       = ['cc-dashboard','cc-newlog','cc-history','cc-tracker','cc-coordinators']; // 'cc-prefs' temporarily disabled
 
 function switchMode(mode) {
   currentMode = mode;
@@ -2579,14 +2576,16 @@ async function reloadCcData() {
   let [cases, logs, coords, prefs] = [null, null, null, null];
   if (inCowork) {
     cases  = await runMcpSql('SELECT * FROM "Case"        ORDER BY updated_date DESC NULLS LAST LIMIT 500');
-    logs   = await runMcpSql('SELECT * FROM "CaseLog"     ORDER BY created_date DESC NULLS LAST LIMIT 1000');
+    logs   = await runMcpSql('SELECT * FROM "CaseLog"     ORDER BY log_date DESC NULLS LAST, created_date DESC NULLS LAST LIMIT 5000');
     coords = await runMcpSql('SELECT * FROM "Coordinator" ORDER BY name LIMIT 200');
-    prefs  = await runMcpSql('SELECT * FROM v_account_preferences ORDER BY practice_name LIMIT 2000');
+    // Preferences tab temporarily disabled
+    // prefs  = await runMcpSql('SELECT * FROM v_account_preferences ORDER BY practice_name LIMIT 2000');
   } else {
     cases  = await restGet('/rest/v1/Case?select=*&order=updated_date.desc.nullslast&limit=500');
-    logs   = await restGet('/rest/v1/CaseLog?select=*&order=created_date.desc.nullslast&limit=1000');
+    logs   = await restGet('/rest/v1/CaseLog?select=*&order=log_date.desc.nullslast,created_date.desc.nullslast&limit=5000');
     coords = await restGet('/rest/v1/Coordinator?select=*&order=name&limit=200');
-    prefs  = await restGet('/rest/v1/v_account_preferences?select=*&order=practice_name&limit=2000');
+    // Preferences tab temporarily disabled
+    // prefs  = await restGet('/rest/v1/v_account_preferences?select=*&order=practice_name&limit=2000');
   }
   ccData.cases = cases || [];
   ccData.logs  = logs  || [];
@@ -2598,7 +2597,7 @@ async function reloadCcData() {
   renderHistory();
   renderTracker();
   renderCoordinators();
-  renderPrefsList();
+  // renderPrefsList(); // Preferences tab temporarily disabled
   populateNewLogForm();
 }
 
@@ -2663,8 +2662,11 @@ function renderDashboard() {
   const today = pacificDate(), yesterday = pacificDate(-1);
   const targetDate = caseTab === 'today' ? today : yesterday;
 
-  const todayLogs = filtered.filter(l => l.log_date === today ||
-    (l.created_date && l.created_date.startsWith(today)));
+  // "Today" = the action's log_date (the business date the coordinator
+  // assigned). log_date is a plain date column, so this is timezone-proof.
+  // Avoid created_date here: it's a UTC timestamp and comparing its UTC date
+  // against a Pacific "today" miscounts rows created in the evening Pacific.
+  const todayLogs = filtered.filter(l => l.log_date === today);
 
   const actionCounts = {};
   filtered.forEach(l => { actionCounts[l.action_type] = (actionCounts[l.action_type] || 0) + 1; });
@@ -3648,6 +3650,7 @@ const TOUR_STEPS = [
   { title: "Manage names", body: "Add or remove the names that appear in dropdowns across the app.",
     selector: '#panel-cc-coordinators', placement: 'top' },
 
+  /* Preferences tab temporarily disabled
   { title: "Click Preferences", body: "Open the last tab. This one matters.",
     selector: '#tabs-cc .tab[data-cc-tab="prefs"]', placement: 'bottom', requireClick: true },
   { title: "Auto-backfilled", body: "Doctor preferences pulled from your existing account data. Yellow badge means not reviewed yet.",
@@ -3658,6 +3661,7 @@ const TOUR_STEPS = [
     selector: '#panel-cc-prefs', placement: 'top' },
   { title: "Preferences feed the emails", body: "Once saved here, they surface on every outbound email automatically.",
     selector: '#panel-cc-prefs', placement: 'top' },
+  */
 
   // Closing
   { title: "That's the tour", body: "You are set.", placement: 'center' },

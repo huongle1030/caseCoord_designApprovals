@@ -28,6 +28,43 @@ let onApprovedCallback = null;
 export function getCurrentUser()     { return currentUser; }
 export function getCurrentEmployee() { return currentEmployee; }
 
+// Current Supabase access token (sent to /api/anthropic so the server can
+// verify the caller is a signed-in @skdla.com user before using the API key).
+export async function getAccessToken() {
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token || null;
+}
+
+// ---- Inactivity auto-logout ----
+// Sign the user out after this many ms with no mouse/keyboard/touch activity.
+const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+const ACTIVITY_EVENTS = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart', 'click'];
+let idleTimerId = null;
+
+function onIdleTimeout() {
+  signOut('You were signed out after 5 minutes of inactivity.');
+}
+
+function resetIdleTimer() {
+  if (idleTimerId) clearTimeout(idleTimerId);
+  idleTimerId = setTimeout(onIdleTimeout, IDLE_TIMEOUT_MS);
+}
+
+function startIdleTimer() {
+  stopIdleTimer();
+  for (const ev of ACTIVITY_EVENTS) {
+    window.addEventListener(ev, resetIdleTimer, { passive: true });
+  }
+  resetIdleTimer();
+}
+
+function stopIdleTimer() {
+  if (idleTimerId) { clearTimeout(idleTimerId); idleTimerId = null; }
+  for (const ev of ACTIVITY_EVENTS) {
+    window.removeEventListener(ev, resetIdleTimer);
+  }
+}
+
 export async function initAuth(onApproved) {
   onApprovedCallback = onApproved;
 
@@ -74,6 +111,7 @@ async function routeFromSession(session) {
   if (employee.role_approval === true && employee.active !== false) {
     await updateLoginTime(user.id);
     hideAuthOverlay();
+    startIdleTimer();
     if (onApprovedCallback) onApprovedCallback(employee);
     return;
   }
@@ -98,11 +136,15 @@ export async function signInWithMicrosoft() {
   }
 }
 
-export async function signOut() {
+export async function signOut(message) {
+  // signOut is also used directly as a click handler, where the first arg is
+  // the click Event — only treat an actual string as a login-screen message.
+  const reason = typeof message === 'string' ? message : undefined;
+  stopIdleTimer();
   await supabase.auth.signOut();
   currentUser = null;
   currentEmployee = null;
-  showLoginScreen();
+  showLoginScreen(reason);
 }
 
 async function getEmployeeRecord(userId) {
