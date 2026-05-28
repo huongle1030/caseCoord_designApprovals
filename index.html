@@ -469,6 +469,35 @@
     border-bottom: 1px solid var(--slate-light);
   }
   .preview p { margin: 0 0 8px; }
+  .preview a { color: var(--blue); }
+  /* Exocad link banner — pinned at the top of the email preview so the
+     coordinator always sees the design link, even if the email template
+     buried it. */
+  .exocad-link-banner {
+    display: flex; align-items: center; gap: 10px;
+    background: #EFF6FC; border: 1px solid #BFDDF1;
+    border-left: 3px solid var(--blue);
+    padding: 8px 12px; border-radius: 4px;
+    margin-bottom: 10px;
+    font-family: 'Montserrat', sans-serif;
+  }
+  .exocad-link-label {
+    font-size: 9.5px; font-weight: 800;
+    letter-spacing: 1.5px; text-transform: uppercase;
+    color: var(--slate);
+  }
+  .exocad-link-anchor {
+    font-size: 13px; font-weight: 600;
+    color: var(--blue); text-decoration: none;
+    word-break: break-all;
+  }
+  .exocad-link-anchor:hover { text-decoration: underline; }
+  /* "View in Exocad" button in the actions row */
+  .act.view-exocad {
+    background: var(--white); color: var(--blue);
+    border: 1px solid var(--blue);
+  }
+  .act.view-exocad:hover { background: var(--pale); }
 
   .actions { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
   button.act {
@@ -1352,9 +1381,10 @@
   .lookup-header {
     background: var(--white); border: 1px solid var(--slate-light);
     border-left: 4px solid var(--blue);
-    border-radius: 6px; padding: 14px 18px; margin-bottom: 16px;
-    display: grid; grid-template-columns: 1fr 1fr 1fr 1fr;
-    gap: 10px;
+    border-radius: 6px; padding: 14px 18px; margin-bottom: 8px;
+    display: grid; grid-template-columns: 1fr 1fr 1fr 1fr auto;
+    gap: 14px;
+    align-items: center;
   }
   .lookup-header .label {
     font-size: 10px; font-weight: 800;
@@ -1363,6 +1393,30 @@
   .lookup-header .value {
     font-size: 14px; color: var(--navy); margin-top: 2px;
     font-weight: 600;
+  }
+  .lookup-actions { display: flex; gap: 6px; }
+  .lookup-actions .act { padding: 7px 14px; font-size: 11px; }
+
+  /* Case info bar (basics about the case under the counts row) */
+  .lookup-case-info {
+    background: var(--white);
+    border: 1px solid var(--slate-light);
+    border-radius: 6px;
+    padding: 12px 18px; margin-bottom: 12px;
+    display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 14px;
+  }
+  .lookup-case-info .ci-label {
+    font-size: 9px; font-weight: 800;
+    color: var(--slate); letter-spacing: 1.5px; text-transform: uppercase;
+    margin-bottom: 2px;
+  }
+  .lookup-case-info .ci-value {
+    font-size: 13px; color: var(--charcoal); font-weight: 600;
+    word-break: break-word;
+  }
+  @media (max-width: 1100px) {
+    .lookup-case-info { grid-template-columns: repeat(3, 1fr); }
   }
   .timeline {
     position: relative; padding-left: 24px;
@@ -2045,6 +2099,912 @@
     .prefs-banner { max-height: 420px; }
   }
   /* Below 900px keeps the existing single-column outbound stack */
+
+  /* ------- Call Notes modal + print styles ------- */
+  .modal-overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(5, 32, 48, 0.55);
+    z-index: 500;
+    align-items: center; justify-content: center;
+    padding: 30px;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal-panel {
+    background: var(--white);
+    border-radius: 10px;
+    width: 100%; max-width: 720px;
+    max-height: 90vh; overflow: hidden;
+    display: flex; flex-direction: column;
+    box-shadow: 0 25px 60px rgba(0,0,0,0.35);
+    font-family: 'Montserrat', sans-serif;
+  }
+  .modal-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 16px 24px;
+    background: var(--navy); color: white;
+    border-radius: 10px 10px 0 0;
+  }
+  .modal-header h3 {
+    font-family: 'Lora', Georgia, serif;
+    font-size: 18px; font-weight: 600; margin: 0;
+  }
+  .modal-close {
+    background: transparent; color: white; border: none;
+    font-size: 26px; line-height: 1; cursor: pointer;
+    padding: 0 4px;
+  }
+  .modal-close:hover { color: var(--blue-soft); }
+  .modal-body {
+    padding: 20px 24px; overflow-y: auto;
+    flex: 1;
+  }
+  .modal-footer {
+    display: flex; justify-content: flex-end; gap: 8px;
+    padding: 14px 24px;
+    border-top: 1px solid var(--slate-light);
+    background: var(--bg);
+    border-radius: 0 0 10px 10px;
+  }
+  .cn-row { display: flex; gap: 16px; margin-bottom: 14px; }
+  .cn-field { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+  .cn-field.cn-full { width: 100%; margin-bottom: 14px; }
+  .cn-field label {
+    font-size: 10px; font-weight: 700; letter-spacing: 1.5px;
+    text-transform: uppercase; color: var(--slate);
+  }
+  .cn-field input, .cn-field textarea {
+    padding: 8px 12px;
+    border: 1px solid var(--slate-light);
+    border-radius: 6px;
+    font-size: 14px;
+    font-family: 'Montserrat', sans-serif;
+    background: var(--white);
+    color: var(--charcoal);
+    outline: none;
+    resize: vertical;
+  }
+  .cn-field input:focus, .cn-field textarea:focus {
+    border-color: var(--blue);
+    box-shadow: 0 0 0 3px rgba(24, 130, 199, 0.1);
+  }
+  .cn-hint {
+    font-size: 10px; color: var(--slate); font-weight: 400;
+    text-transform: none; letter-spacing: 0;
+    margin-left: 6px;
+  }
+
+  /* ===== Metrics modal ===== */
+  .metrics-panel { max-width: 1200px; width: 96%; }
+  .metrics-panel .modal-body { padding: 0; }
+  .metrics-summary {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 10px; padding: 16px 20px;
+    background: var(--bg); border-bottom: 1px solid var(--slate-light);
+  }
+  .metrics-summary-tile {
+    background: var(--white); border: 1px solid var(--slate-light);
+    border-radius: 8px; padding: 10px 14px;
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .metrics-summary-tile .label {
+    font-size: 9.5px; font-weight: 700; letter-spacing: 1.4px;
+    text-transform: uppercase; color: var(--slate);
+  }
+  .metrics-summary-tile .value {
+    font-family: 'Lora', Georgia, serif;
+    font-size: 22px; font-weight: 600; color: var(--navy);
+    line-height: 1.1;
+  }
+  .metrics-summary-tile .sub {
+    font-size: 11px; color: var(--slate);
+  }
+  .metrics-controls {
+    display: flex; gap: 10px; align-items: center;
+    padding: 12px 20px; border-bottom: 1px solid var(--slate-light);
+    background: var(--white);
+  }
+  .metrics-controls input.metrics-search {
+    flex: 1; padding: 7px 12px;
+    border: 1px solid var(--slate-light); border-radius: 6px;
+    font-family: 'Montserrat', sans-serif; font-size: 13px;
+    outline: none;
+  }
+  .metrics-controls input.metrics-search:focus {
+    border-color: var(--blue);
+    box-shadow: 0 0 0 3px rgba(24, 130, 199, 0.1);
+  }
+  .metrics-controls .metrics-sort {
+    padding: 7px 10px; font-size: 12px;
+    border: 1px solid var(--slate-light); border-radius: 6px;
+    background: var(--white); font-family: 'Montserrat', sans-serif;
+    cursor: pointer; color: var(--charcoal);
+  }
+  .metrics-table-wrap {
+    overflow: auto; max-height: 60vh;
+  }
+  table.metrics-table {
+    width: 100%; border-collapse: collapse;
+    font-family: 'Montserrat', sans-serif; font-size: 12.5px;
+  }
+  table.metrics-table thead th {
+    position: sticky; top: 0; z-index: 5;
+    background: var(--navy); color: white;
+    font-weight: 600; text-align: left;
+    padding: 10px 12px; font-size: 10.5px;
+    text-transform: uppercase; letter-spacing: 1.2px;
+    border-bottom: 2px solid var(--blue-soft);
+    white-space: nowrap;
+  }
+  table.metrics-table thead th.numeric { text-align: right; }
+  table.metrics-table tbody td {
+    padding: 9px 12px; border-bottom: 1px solid var(--slate-light);
+    vertical-align: top;
+  }
+  table.metrics-table tbody td.numeric { text-align: right; font-variant-numeric: tabular-nums; }
+  table.metrics-table tbody tr:hover { background: rgba(74, 190, 238, 0.06); }
+  table.metrics-table .doctor-cell {
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  table.metrics-table .doctor-cell .name {
+    font-weight: 600; color: var(--navy);
+  }
+  table.metrics-table .doctor-cell .practice {
+    font-size: 10.5px; color: var(--slate);
+  }
+  table.metrics-table .partner-chip {
+    display: inline-block;
+    background: rgba(179, 163, 105, 0.15);
+    color: #6b5e2f;
+    padding: 2px 7px; border-radius: 10px;
+    font-size: 10px; font-weight: 600; letter-spacing: 0.3px;
+  }
+  table.metrics-table .yield-pill {
+    display: inline-block;
+    padding: 3px 9px; border-radius: 11px;
+    font-size: 11px; font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  table.metrics-table .yield-pill.good { background: #DCFCE7; color: #166534; }
+  table.metrics-table .yield-pill.okay { background: #FEF3C7; color: #92400E; }
+  table.metrics-table .yield-pill.bad  { background: #FEE2E2; color: #991B1B; }
+  table.metrics-table .yield-pill.muted { background: var(--bg); color: var(--slate); }
+  table.metrics-table .metric-empty {
+    color: var(--slate-light); font-style: italic; font-size: 11px;
+  }
+  table.metrics-table .duration-cell .dur-days {
+    font-weight: 600; color: var(--charcoal);
+  }
+  table.metrics-table .duration-cell .dur-sub {
+    font-size: 10.5px; color: var(--slate);
+  }
+  .metrics-footer-note {
+    padding: 10px 20px; font-size: 11.5px;
+    color: var(--slate); background: var(--bg);
+    border-top: 1px solid var(--slate-light);
+    font-style: italic; line-height: 1.45;
+  }
+  .metrics-loading {
+    padding: 60px 20px; text-align: center; color: var(--slate);
+    font-size: 13px;
+  }
+  .metrics-empty {
+    padding: 60px 20px; text-align: center;
+    color: var(--slate); font-family: 'Lora', Georgia, serif;
+  }
+
+  /* ===== Reschedule bucket chips + per-row action ===== */
+  .bucket-chip {
+    display: inline-block;
+    padding: 3px 9px; border-radius: 11px;
+    font-size: 10.5px; font-weight: 700;
+    letter-spacing: 0.5px; text-transform: uppercase;
+    font-family: 'Montserrat', sans-serif;
+  }
+  .bucket-chip.pre  { background: #FEF3C7; color: #92400E; }
+  .bucket-chip.late { background: #FEE2E2; color: #991B1B; }
+  .resched-action-btn {
+    padding: 6px 12px; border-radius: 5px;
+    border: 1px solid var(--blue); background: var(--blue);
+    color: white; font-size: 11.5px; font-weight: 600;
+    font-family: 'Montserrat', sans-serif;
+    cursor: pointer; letter-spacing: 0.3px;
+  }
+  .resched-action-btn:hover { background: #1372b0; }
+  .resched-action-btn:disabled {
+    background: var(--slate-light); border-color: var(--slate-light);
+    color: var(--slate); cursor: not-allowed;
+  }
+
+  /* Time-sensitive escalation chip in Pending Replies */
+  .match-chip.escalate {
+    background: #FEE2E2; color: #991B1B;
+  }
+
+  /* ===== Case Lookup AI summary + print event blocks ===== */
+  .case-summary-box {
+    background: #FFFBED;
+    border: 1px solid #E8DCB2;
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin: 12px 0 16px;
+    font-family: 'Lora', Georgia, serif;
+  }
+  .case-summary-label {
+    font-family: 'Montserrat', sans-serif;
+    font-size: 10px; font-weight: 800;
+    letter-spacing: 1.6px; text-transform: uppercase;
+    color: var(--gold); margin-bottom: 6px;
+  }
+  #case-summary-text {
+    font-size: 13.5px; line-height: 1.55; color: var(--charcoal);
+    white-space: pre-wrap;
+  }
+
+  /* Print-only stylesheet — gives us a clean, branded PDF.
+     Hidden on screen, replaces the whole document during window.print(). */
+  .call-notes-print { display: none; }
+  @media print {
+    body * { visibility: hidden; }
+    .call-notes-print, .call-notes-print * { visibility: visible; }
+    .call-notes-print {
+      display: block;
+      position: absolute; top: 0; left: 0;
+      width: 100%; padding: 32px 40px;
+      font-family: 'Lora', Georgia, serif;
+      color: #1F2937;
+    }
+    .call-notes-print .cnp-header {
+      display: flex; justify-content: space-between; align-items: flex-end;
+      border-bottom: 3px solid #052030;
+      padding-bottom: 12px; margin-bottom: 24px;
+    }
+    .call-notes-print .cnp-brand {
+      font-family: 'Montserrat', sans-serif;
+      font-weight: 800; font-size: 22px; color: #052030;
+      letter-spacing: 2px; text-transform: uppercase;
+    }
+    .call-notes-print .cnp-brand small {
+      display: block;
+      font-size: 10px; letter-spacing: 2px;
+      color: #1882C7; font-weight: 500;
+      margin-top: 2px;
+    }
+    .call-notes-print .cnp-date {
+      font-size: 12px; color: #6B7785;
+      font-family: 'Montserrat', sans-serif;
+    }
+    .call-notes-print h2 {
+      font-family: 'Lora', Georgia, serif;
+      font-size: 24px; color: #052030;
+      margin: 0 0 16px;
+    }
+    .call-notes-print .cnp-meta {
+      background: #F4F7FA;
+      border-left: 3px solid #1882C7;
+      padding: 12px 16px;
+      margin-bottom: 24px;
+      font-size: 13px;
+      font-family: 'Montserrat', sans-serif;
+    }
+    .call-notes-print .cnp-meta div { margin-bottom: 4px; }
+    .call-notes-print .cnp-meta strong { color: #052030; }
+    .call-notes-print .cnp-section-label {
+      font-family: 'Montserrat', sans-serif;
+      font-size: 10px; font-weight: 800;
+      letter-spacing: 2px; text-transform: uppercase;
+      color: #B3A369; margin: 20px 0 6px;
+    }
+    .call-notes-print .cnp-summary {
+      background: #FFFBED;
+      border: 1px solid #E8DCB2;
+      border-radius: 4px;
+      padding: 14px 18px;
+      margin-bottom: 20px;
+      font-size: 13px; line-height: 1.55;
+    }
+    .call-notes-print .cnp-body {
+      font-size: 13px; line-height: 1.7;
+      white-space: pre-wrap;
+    }
+    .call-notes-print .cnp-footer {
+      margin-top: 40px;
+      padding-top: 12px;
+      border-top: 1px solid #DDE2E8;
+      font-size: 10px; color: #6B7785;
+      font-family: 'Montserrat', sans-serif;
+      text-align: center;
+    }
+    /* Per-event blocks used by the Case Lookup print */
+    .call-notes-print .cnp-event {
+      border-left: 3px solid #1882C7;
+      padding: 8px 14px;
+      margin-bottom: 12px;
+      page-break-inside: avoid;
+      background: #FBFCFD;
+      font-family: 'Lora', Georgia, serif;
+    }
+    .call-notes-print .cnp-event-head {
+      display: flex; justify-content: space-between; align-items: baseline;
+      font-family: 'Montserrat', sans-serif;
+      font-size: 10px; font-weight: 800;
+      letter-spacing: 1px; text-transform: uppercase;
+      color: #052030;
+      margin-bottom: 4px;
+    }
+    .call-notes-print .cnp-event-time { color: #6B7785; font-weight: 600; }
+    .call-notes-print .cnp-event-type { color: #052030; }
+    .call-notes-print .cnp-event-who {
+      font-size: 11px; color: #6B7785;
+      font-family: 'Montserrat', sans-serif;
+      margin-bottom: 3px;
+    }
+    .call-notes-print .cnp-event-subj {
+      font-size: 12px; font-weight: 700;
+      color: #052030; margin-bottom: 4px;
+    }
+    .call-notes-print .cnp-event-body {
+      font-size: 12px; line-height: 1.55;
+      white-space: pre-wrap;
+      color: #1F2937;
+    }
+    .call-notes-print .cnp-event-note {
+      font-size: 10px; color: #6B7785;
+      margin-top: 4px;
+    }
+    @page { margin: 0.5in; }
+  }
+
+  /* =====================================================================
+     DESIGN APPROVALS RETUNE
+     Softer typography for the Outreach (Design Approvals) tabs so they
+     feel less cramped and less heavy, matching the Case Coordination
+     side. Reduces font-weight from 800 to 600-700 across chips/buttons,
+     drops aggressive letter-spacing, swaps most UPPERCASE labels for
+     Title Case, and adds breathing room inside item cards.
+     Scoped to the outreach tabs so we don't disturb the CC look that
+     already feels right.
+     ===================================================================== */
+  body { font-size: 14px; }
+
+  /* === Three-bar layout: appbar, KPI strip, tabs strip ===
+     Span the full page width edge-to-edge so all three bars are the
+     same length. Flex layouts wrap on smaller screens so nothing gets
+     clipped. */
+  .appbar {
+    width: 100%;
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+  .kpi-strip { padding: 0; width: 100%; }
+  .stats {
+    width: 100%;
+    border-radius: 0;
+    border-left: none; border-right: none;
+    flex-wrap: wrap;
+  }
+  .stat-tile {
+    flex: 1 1 220px;
+    min-width: 0;
+    border-right: 1px solid var(--slate-light);
+  }
+  .stat-tile:last-child { border-right: none; }
+
+  .tabs {
+    width: 100%;
+    flex-wrap: wrap;
+    padding: 0;
+  }
+  .tab {
+    flex: 1 1 140px;
+    min-width: 0;
+  }
+  /* When tabs wrap, the soft divider only makes sense between siblings
+     on the same row — hide it for items that wrap to a new row by
+     letting it remain (it will sit on the new row's left edge harmlessly). */
+
+  /* Tabs: lighter weight, gentler tracking, Title-case feel */
+  .tabs { font-weight: 500; }
+  .tab {
+    font-size: 12px; font-weight: 600;
+    letter-spacing: 0.4px; text-transform: none;
+    padding: 16px 18px; min-height: 56px;
+  }
+  .tab .badge {
+    font-weight: 700; letter-spacing: 0;
+    font-size: 10px;
+  }
+
+  /* KPI strip: tone down the giant bold numbers */
+  .stat-tile { padding: 10px 22px; }
+  .stat-tile .label {
+    font-weight: 600; letter-spacing: 1.2px;
+    font-size: 10.5px;
+  }
+  .stat-tile .value {
+    font-weight: 600; letter-spacing: -0.3px;
+    font-size: 28px;
+  }
+  .stat-tile .sub { font-size: 11.5px; }
+
+  /* Panel header — match CC's restrained title weight */
+  .panel { padding: 14px 28px 28px; }
+  .panel h2 {
+    font-size: 22px; font-weight: 500;
+    margin-bottom: 12px;
+  }
+
+  /* Item card: more breathing room, lighter ID block */
+  .item {
+    border-radius: 10px; margin-bottom: 10px;
+  }
+  .item-head {
+    padding: 14px 18px; gap: 14px;
+  }
+  .item-head .subject {
+    font-size: 14px; font-weight: 500;
+    margin-top: 8px; line-height: 1.45;
+  }
+  .item-head .who { font-size: 12.5px; margin-top: 4px; }
+  .case-id-block { margin-right: 10px; }
+  .case-id-block .pan {
+    font-size: 16px; font-weight: 700; letter-spacing: 0.3px;
+  }
+  .case-id-block .case-sub {
+    font-size: 12px; font-weight: 500;
+  }
+  .item-head .case {
+    font-weight: 700;
+  }
+
+  /* Chips: drop weight from 800 to 600, Title-case, smaller tracking */
+  .reason-chip,
+  .activity-chip,
+  .revenue-chip,
+  .partner-chip,
+  .bucket-chip,
+  .match-chip,
+  .case.nolink-case,
+  .tl-status-chip,
+  .ai-chip {
+    font-weight: 600; letter-spacing: 0.4px;
+    text-transform: none;
+  }
+  .reason-chip,
+  .activity-chip,
+  .match-chip { font-size: 11px; padding: 3px 10px; }
+
+  /* Meta: soften the attempt counter */
+  .meta { font-size: 11.5px; }
+  .meta .stamp {
+    font-weight: 600; font-size: 15px; letter-spacing: 0;
+  }
+
+  /* Preview block: lighter subject, more padding */
+  .preview { padding: 16px 18px; font-size: 13.5px; line-height: 1.55; }
+  .preview-subject {
+    font-weight: 600; font-size: 14.5px;
+    padding-bottom: 10px; margin-bottom: 10px;
+  }
+
+  /* Buttons in the actions row: Title Case, smaller tracking */
+  button.act {
+    font-weight: 600; letter-spacing: 0.3px;
+    text-transform: none; font-size: 13px;
+    padding: 9px 18px; border-radius: 7px;
+  }
+
+  /* Custom dropdown labels in toolbars: less shouty */
+  .custom-dd-btn,
+  .toolbar-label {
+    font-weight: 600; letter-spacing: 0.3px;
+    text-transform: none;
+  }
+  .toolbar-label { font-size: 12px; }
+  .custom-dd-btn { font-size: 12.5px; }
+
+  /* Prefs banner label */
+  .prefs-banner .label {
+    font-weight: 700; letter-spacing: 1px;
+    font-size: 10.5px;
+  }
+  .prefs-banner .summary-headline { font-weight: 600; }
+
+  /* Exocad link banner re-tune */
+  .exocad-link-label { font-weight: 700; letter-spacing: 1px; }
+  .exocad-link-anchor { font-weight: 500; }
+
+  /* Pending Replies confidence + match chips */
+  .conf-bar { height: 4px; }
+
+  /* =====================================================================
+     UNIFIED PILL STYLE — matches the Case Coordination tab's
+     .cc-action-badge look: pale background, matching colored border,
+     darker text, Title-case, weight 600-700. Applied to every button
+     and chip across the Design Approvals (Outreach) side so the two
+     tabs feel like one product.
+     Pattern:  background: <pale>; color: <dark>; border: 1px solid <mid>;
+     ===================================================================== */
+
+  /* --- Appbar right side ---
+     Action row "Tour | Metrics | Log Call | Refresh Page | Settings" is
+     vertically centered with the bar. The "All sends gated · Updated …"
+     status sits lower (at the bottom of the appbar in muted gray). */
+  .appbar {
+    align-items: center;
+    /* Equal top/bottom padding so .brand and .appbar-actions sit truly
+       vertical-centered with the bar. The absolutely-positioned status
+       row tucks into the bottom padding without shifting the centerline. */
+    padding-top: 26px;
+    padding-bottom: 26px;
+    position: relative;
+  }
+  /* Tabs strip scrolls with the page (both Design Approvals and
+     Case Coordination tabs use the .tabs class) */
+  .tabs { position: static; top: auto; }
+  .appbar-right {
+    display: flex;
+    align-items: center;       /* vertically center the action row */
+    justify-content: flex-end;
+    gap: 0;
+  }
+  .appbar-actions {
+    display: flex; align-items: center;
+    gap: 14px; flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  .appbar-link {
+    background: transparent;
+    border: none;
+    padding: 4px 2px;
+    color: var(--white);
+    font-family: inherit;
+    font-size: 15px;
+    font-weight: 500;
+    letter-spacing: 0.2px;
+    cursor: pointer;
+    transition: color 0.15s, opacity 0.15s;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+  .appbar-link:hover { color: var(--blue-soft); }
+  .appbar-link:focus { outline: none; color: var(--blue-soft); }
+  .appbar-sep {
+    color: rgba(255,255,255,0.3);
+    font-size: 14px;
+    user-select: none;
+  }
+  /* Settings menu trigger inside the action row */
+  .appbar .settings-menu { position: relative; display: inline-flex; align-items: center; }
+  .appbar .settings-menu .settings-dropdown {
+    position: absolute; top: calc(100% + 8px); right: 0;
+  }
+
+  /* Lower status row — pinned to the bottom of the appbar */
+  .appbar-status {
+    position: absolute;
+    right: 28px; bottom: 6px;
+    display: flex; align-items: center; gap: 8px;
+    color: rgba(255,255,255,0.5);
+    font-size: 11.5px;
+    font-weight: 400;
+  }
+  .appbar-status-gate {
+    color: rgba(255,255,255,0.5);
+    font-weight: 400;
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+  }
+  .appbar-status-sep { color: rgba(255,255,255,0.3); }
+  .appbar-status .updated { color: rgba(255,255,255,0.5); }
+
+  /* --- Action buttons inside item cards (Approve, Edit, Auto Resummarize,
+     View in Exocad, Reject, etc.) — pill style with colored border --- */
+  button.act,
+  .act {
+    background: var(--white);
+    color: var(--navy);
+    border: 1px solid var(--slate-light);
+    border-radius: 14px;
+    padding: 7px 16px;
+    font-size: 12.5px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    text-transform: none;
+    font-family: inherit;
+    box-shadow: none;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+  }
+  button.act:hover,
+  .act:hover {
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  }
+  button.act.approve,
+  .act.approve {
+    background: #D1FAE5; color: #065F46; border-color: #A7F3D0;
+  }
+  button.act.approve:hover { background: #A7F3D0; }
+  button.act.edit,
+  .act.edit {
+    background: #FEF3C7; color: #92400E; border-color: #FDE68A;
+  }
+  button.act.edit:hover { background: #FDE68A; }
+  button.act.blue,
+  .act.blue {
+    background: #DBEAFE; color: #1E3A8A; border-color: #BFDBFE;
+  }
+  button.act.blue:hover { background: #BFDBFE; }
+  button.act.reject,
+  .act.reject {
+    background: #FEE4E4; color: #B91C1C; border-color: #FBC7C7;
+  }
+  button.act.reject:hover { background: #FBC7C7; }
+  button.act.slate,
+  .act.slate {
+    background: #F1F5F9; color: #334155; border-color: #CBD5E1;
+  }
+  button.act.slate:hover { background: #E2E8F0; }
+  button.act.ghost,
+  .act.ghost {
+    background: var(--white); color: var(--slate);
+    border-color: var(--slate-light);
+  }
+  button.act.ghost:hover {
+    background: #F8FAFC; color: var(--charcoal);
+    border-color: #CBD5E1;
+  }
+  button.act.view-exocad {
+    background: #DBEAFE; color: #1E3A8A; border-color: #BFDBFE;
+  }
+  button.act.view-exocad:hover { background: #BFDBFE; }
+  button.act[style*="--red"] {
+    background: #FEE4E4 !important; color: #B91C1C !important;
+    border-color: #FBC7C7 !important;
+  }
+  button.act[style*="--gold"] {
+    background: #FEF3C7 !important; color: #92400E !important;
+    border-color: #FDE68A !important;
+  }
+  button.act:disabled {
+    opacity: 0.5; cursor: not-allowed; box-shadow: none;
+  }
+
+  /* --- Chips throughout: pill bg + colored border + dark text --- */
+  .reason-chip,
+  .activity-chip,
+  .revenue-chip,
+  .partner-chip,
+  .bucket-chip,
+  .match-chip,
+  .case.nolink-case,
+  .ai-chip,
+  .tl-status-chip,
+  .yield-pill,
+  .role-chip {
+    padding: 3px 10px;
+    border-radius: 12px;
+    border: 1px solid transparent;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    text-transform: none;
+    font-family: inherit;
+  }
+
+  /* Reason chips: design approval (blue), missing info (gold), waiting (slate), mod (navy) */
+  .reason-chip { background: #DBEAFE; color: #1E3A8A; border-color: #BFDBFE; }
+  .reason-chip.missing_info { background: #FEF3C7; color: #92400E; border-color: #FDE68A; }
+  .reason-chip.waiting_on_parts { background: #F1F5F9; color: #334155; border-color: #CBD5E1; }
+  .reason-chip.design_modification { background: #DBEAFE; color: #1E3A8A; border-color: #BFDBFE; }
+
+  /* Activity chips */
+  .activity-chip.reply  { background: #FEE4E4; color: #B91C1C; border-color: #FBC7C7; }
+  .activity-chip.note   { background: #FEF3C7; color: #92400E; border-color: #FDE68A; }
+  .activity-chip.send   { background: #DBEAFE; color: #1E3A8A; border-color: #BFDBFE; }
+  .activity-chip.miss   { background: #FEE4E4; color: #B91C1C; border-color: #FBC7C7; }
+  .activity-chip.nolink { background: #FEF3C7; color: #92400E; border-color: #FDE68A; }
+
+  /* Revenue chips — keep them all green regardless of tier */
+  .revenue-chip,
+  .revenue-chip.high,
+  .revenue-chip.mid,
+  .revenue-chip.low {
+    background: #D1FAE5; color: #065F46; border-color: #A7F3D0;
+  }
+
+  /* Partner chips — color-coded by partner brand */
+  /* Aspen ClearChoice → cool-toned (indigo) purple */
+  /* Aspen Dental      → warm (violet) purple */
+  /* TRI Dental        → orange */
+  .partner-chip             { background: #F1F5F9; color: #334155; border-color: #CBD5E1; }
+  .partner-chip.clearchoice { background: #E0E7FF; color: #3730A3; border-color: #C7D2FE; }
+  .partner-chip.aspen       { background: #F3E8FF; color: #6B21A8; border-color: #E9D5FF; }
+  .partner-chip.tri         { background: #FFEDD5; color: #9A3412; border-color: #FED7AA; }
+  .partner-chip.incisive    { background: #DBEAFE; color: #1E3A8A; border-color: #BFDBFE; }
+  .partner-chip.other       { background: #F1F5F9; color: #334155; border-color: #CBD5E1; }
+
+  /* Bucket chips (Reschedule) */
+  .bucket-chip.pre  { background: #FEF3C7; color: #92400E; border-color: #FDE68A; }
+  .bucket-chip.late { background: #FEE4E4; color: #B91C1C; border-color: #FBC7C7; }
+
+  /* Match chips */
+  .match-chip          { background: #F1F5F9; color: #334155; border-color: #CBD5E1; }
+  .match-chip.low      { background: #FEF3C7; color: #92400E; border-color: #FDE68A; }
+  .match-chip.escalate { background: #FEE4E4; color: #B91C1C; border-color: #FBC7C7; }
+
+  /* Unmatched "Needs case lookup" case badge */
+  .case.nolink-case { background: #FEF3C7; color: #92400E; border-color: #FDE68A; }
+
+  /* AI classification chip */
+  .ai-chip                          { background: #F1F5F9; color: #334155; border-color: #CBD5E1; }
+  .ai-chip.approved                 { background: #D1FAE5; color: #065F46; border-color: #A7F3D0; }
+  .ai-chip.approved_with_mods       { background: #DBEAFE; color: #1E3A8A; border-color: #BFDBFE; }
+  .ai-chip.modification             { background: #FEF3C7; color: #92400E; border-color: #FDE68A; }
+  .ai-chip.pricing_or_product_question { background: #F3E8FF; color: #6B21A8; border-color: #E9D5FF; }
+  .ai-chip.other                    { background: #F1F5F9; color: #334155; border-color: #CBD5E1; }
+  .ai-chip.unclear                  { background: #F1F5F9; color: #334155; border-color: #CBD5E1; }
+
+  /* Timeline status chips (Case Lookup) */
+  .tl-status-chip                    { background: #F1F5F9; color: #334155; border-color: #CBD5E1; }
+  .tl-status-chip.approved           { background: #D1FAE5; color: #065F46; border-color: #A7F3D0; }
+  .tl-status-chip.approved_with_mods { background: #DBEAFE; color: #1E3A8A; border-color: #BFDBFE; }
+  .tl-status-chip.modification       { background: #FEF3C7; color: #92400E; border-color: #FDE68A; }
+
+  /* Metrics yield pill */
+  table.metrics-table .yield-pill.good  { background: #D1FAE5; color: #065F46; border-color: #A7F3D0; }
+  table.metrics-table .yield-pill.okay  { background: #FEF3C7; color: #92400E; border-color: #FDE68A; }
+  table.metrics-table .yield-pill.bad   { background: #FEE4E4; color: #B91C1C; border-color: #FBC7C7; }
+  table.metrics-table .yield-pill.muted { background: #F1F5F9; color: #334155; border-color: #CBD5E1; }
+
+  /* Outbound revenue chip in the outbound list */
+  .case-id-block { margin-right: 10px; }
+
+  /* Pending Outbound case `.case` (the "Case 2026-XXXXX" bubble) */
+  .item-head .case {
+    background: #F1F5F9; color: #334155;
+    border: 1px solid #CBD5E1;
+    padding: 3px 10px; border-radius: 12px;
+    font-size: 11px; font-weight: 600;
+    font-family: Consolas, monospace;
+    letter-spacing: 0.3px;
+  }
+
+  /* --- Misc smaller buttons in Outreach panels: same soft-pill treatment --- */
+  .hide-sender-btn {
+    background: #F1F5F9; color: #334155;
+    border: 1px solid #CBD5E1;
+    border-radius: 12px;
+    padding: 4px 12px;
+    font-size: 11px; font-weight: 600;
+    letter-spacing: 0.2px; text-transform: none;
+    font-family: inherit;
+  }
+  .hide-sender-btn:hover {
+    background: #FEE4E4; color: #B91C1C; border-color: #FBC7C7;
+  }
+
+  .export-btn {
+    background: #FEF3C7; color: #92400E;
+    border: 1px solid #FDE68A;
+    border-radius: 14px;
+    padding: 6px 14px;
+    font-size: 12px; font-weight: 600;
+    letter-spacing: 0.2px; text-transform: none;
+    font-family: inherit;
+  }
+  .export-btn:hover { background: #FDE68A; }
+
+  .reply-thread-toggle {
+    background: transparent; color: var(--slate);
+    border: 1px solid var(--slate-light);
+    border-radius: 12px;
+    padding: 4px 12px;
+    font-size: 11.5px; font-weight: 600;
+    text-transform: none; letter-spacing: 0.2px;
+    font-family: inherit;
+  }
+  .reply-thread-toggle:hover {
+    background: #DBEAFE; color: #1E3A8A; border-color: #BFDBFE;
+  }
+
+  /* Editor toolbar buttons (B / I / U / etc.) — keep compact + soft */
+  .editor-toolbar button {
+    border-radius: 8px; font-family: inherit;
+    font-weight: 600;
+  }
+
+  /* Case Lookup incremental-search suggestions */
+  .lookup-suggestions {
+    background: var(--white);
+    border: 1px solid var(--slate-light);
+    border-radius: 10px;
+    margin-top: 10px;
+    overflow: hidden;
+  }
+  .lookup-suggest-head {
+    padding: 10px 16px;
+    background: #F8FAFC;
+    border-bottom: 1px solid var(--slate-light);
+    font-size: 11px; font-weight: 600;
+    color: var(--slate); letter-spacing: 0.4px;
+  }
+  .lookup-suggest-row {
+    display: grid;
+    grid-template-columns: 130px 1fr 1.4fr auto;
+    gap: 14px; align-items: center;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--slate-light);
+    cursor: pointer;
+    transition: background 0.12s;
+    font-size: 13px;
+  }
+  .lookup-suggest-row:last-child { border-bottom: none; }
+  .lookup-suggest-row:hover { background: #DBEAFE; }
+  .lookup-suggest-row .ls-case {
+    font-family: Consolas, monospace;
+    font-weight: 700; color: var(--navy);
+    letter-spacing: 0.3px;
+  }
+  .lookup-suggest-row .ls-patient { color: var(--charcoal); }
+  .lookup-suggest-row .ls-dr { color: var(--slate); font-size: 12px; }
+  .lookup-suggest-row .ls-step {
+    color: var(--slate); font-size: 11px;
+    text-align: right; white-space: nowrap;
+  }
+  .lookup-suggest-loading,
+  .lookup-suggest-empty,
+  .lookup-suggest-error {
+    padding: 16px;
+    color: var(--slate); font-size: 13px;
+    text-align: center;
+  }
+  .lookup-suggest-error { color: var(--red); }
+
+  /* Reason chip in the right-side meta column (under Attempt N) */
+  .meta .meta-reason {
+    margin-top: 6px;
+    display: flex; justify-content: flex-end;
+  }
+
+  /* Per-row "Send reschedule email" button — pill */
+  .resched-action-btn {
+    background: #DBEAFE; color: #1E3A8A;
+    border: 1px solid #BFDBFE;
+    border-radius: 14px;
+    padding: 6px 14px;
+    font-size: 12px; font-weight: 600;
+    letter-spacing: 0.2px;
+    font-family: inherit;
+  }
+  .resched-action-btn:hover { background: #BFDBFE; }
+  .resched-action-btn:disabled {
+    background: #F1F5F9; color: #94A3B8; border-color: #E2E8F0;
+  }
+
+  /* Modal action buttons that use the .refresh-btn class — match too,
+     but keep readable bright fill since they sit on white panels */
+  .modal-footer button.refresh-btn,
+  .users-controls button.refresh-btn {
+    background: #DBEAFE !important;
+    color: #1E3A8A !important;
+    border: 1px solid #BFDBFE !important;
+    border-radius: 14px !important;
+    padding: 7px 16px !important;
+    font-size: 12.5px !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.2px !important;
+    text-transform: none !important;
+    font-family: inherit !important;
+    box-shadow: none !important;
+  }
+  .modal-footer button.refresh-btn[style*="--slate"],
+  .modal-footer button.refresh-btn[style*="--gold"] {
+    background: #F1F5F9 !important;
+    color: #334155 !important;
+    border-color: #CBD5E1 !important;
+  }
 </style>
 </head>
 <body>
@@ -2078,33 +3038,19 @@
     </div>
   </div>
   <div class="appbar-right">
-    <span class="pill-gold" id="gateStatus">All sends gated</span>
-    <span class="updated"><span class="dot" id="status-dot"></span><span id="lastUpdated">Loading…</span></span>
-    <button class="refresh-btn" onclick="loadAll()">Refresh</button>
-    <button class="tour-launch" id="tour-btn" onclick="startTour()">✨ Tour</button>
-    <div class="settings-menu" id="settings-menu">
-      <button class="gear-btn" onclick="toggleSettings(event)" aria-label="Settings">
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="3"></circle>
-          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-        </svg>
-      </button>
-      <div class="settings-dropdown" id="settings-dropdown">
-        <div class="settings-item" onclick="openConfig(); closeSettings();">
-          <span class="settings-icon">⚙</span>
-          <div class="settings-info">
-            <span class="settings-name">Configuration</span>
-            <span class="settings-desc">Supabase URL and API key</span>
-          </div>
-        </div>
-        <div class="settings-item" onclick="toggleDiag(); closeSettings();">
-          <span class="settings-icon">🔧</span>
-          <div class="settings-info">
-            <span class="settings-name">Diagnostics</span>
-            <span class="settings-desc">Raw response from last call</span>
-          </div>
-        </div>
-      </div>
+    <div class="appbar-actions">
+      <button type="button" class="appbar-link" id="tour-btn" onclick="startTour()">Tour</button>
+      <span class="appbar-sep" aria-hidden="true">|</span>
+      <button type="button" class="appbar-link" onclick="openMetrics()">Metrics</button>
+      <span class="appbar-sep" aria-hidden="true">|</span>
+      <button type="button" class="appbar-link" onclick="openCallNotes()">Log Call</button>
+      <span class="appbar-sep" aria-hidden="true">|</span>
+      <button type="button" class="appbar-link" onclick="loadAll()">Refresh Page</button>
+    </div>
+    <div class="appbar-status">
+      <span class="appbar-status-gate" id="gateStatus">All sends gated</span>
+      <span class="appbar-status-sep" aria-hidden="true">·</span>
+      <span class="updated"><span class="dot" id="status-dot"></span><span id="lastUpdated">Loading…</span></span>
     </div>
   </div>
 </div>
@@ -2189,14 +3135,6 @@
         <option value="due_soonest">Due date: soonest</option>
         <option value="due_latest">Most overdue</option>
       </select>
-      <label class="toolbar-label" style="margin-left: 18px;">Filter</label>
-      <div class="custom-dd" id="outbound-filter-dd">
-        <button type="button" class="custom-dd-btn" onclick="toggleFilterDd(event)" aria-haspopup="listbox">
-          <span class="custom-dd-label" id="outbound-filter-label">All drafts</span>
-          <span class="chip-count" id="outbound-filter-count">–</span>
-        </button>
-        <div class="custom-dd-menu" id="outbound-filter-menu" role="listbox"></div>
-      </div>
       <label class="toolbar-label" style="margin-left: 18px;">Strategic partner</label>
       <div class="custom-dd" id="outbound-partner-dd">
         <button type="button" class="custom-dd-btn" onclick="togglePartnerDd(event)" aria-haspopup="listbox">
@@ -2204,6 +3142,14 @@
           <span class="chip-count" id="outbound-partner-count">–</span>
         </button>
         <div class="custom-dd-menu" id="outbound-partner-menu" role="listbox"></div>
+      </div>
+      <label class="toolbar-label" style="margin-left: 18px;">Filter</label>
+      <div class="custom-dd" id="outbound-filter-dd">
+        <button type="button" class="custom-dd-btn" onclick="toggleFilterDd(event)" aria-haspopup="listbox">
+          <span class="custom-dd-label" id="outbound-filter-label">All drafts</span>
+          <span class="chip-count" id="outbound-filter-count">–</span>
+        </button>
+        <div class="custom-dd-menu" id="outbound-filter-menu" role="listbox"></div>
       </div>
     </div>
     <div class="outbound-count" id="outbound-count"></div>
@@ -2281,15 +3227,28 @@
     Uses a 5 business-day manufacturing window from approval. Cutoff is 9am PST today: approved before that → today counts as Day 1, after → Day 1 is tomorrow. The earliest ship date here assumes approval lands right now.
   </p>
   <div class="resched-summary" id="resched-summary">Loading…</div>
+  <div style="display:flex; align-items:center; gap:10px; margin: 8px 0 6px;">
+    <label class="toolbar-label">Bucket</label>
+    <div class="custom-dd" id="resched-filter-dd">
+      <button type="button" class="custom-dd-btn" onclick="toggleReschedFilterDd(event)" aria-haspopup="listbox">
+        <span class="custom-dd-label" id="resched-filter-label">All</span>
+        <span class="chip-count" id="resched-filter-count">–</span>
+      </button>
+      <div class="custom-dd-menu" id="resched-filter-menu" role="listbox"></div>
+    </div>
+  </div>
   <div id="resched-list" style="margin-top: 6px;"></div>
 </div>
 
 <div class="panel hidden" id="panel-lookup">
   <h2>Case Lookup <span style="color: var(--slate); font-weight: 400; font-size: 14px; font-family: 'Montserrat', sans-serif;">·  every communication on a case, in order</span></h2>
   <div class="lookup-bar">
-    <input id="lookup-input" type="text" placeholder="Enter case number, e.g. 2026-39822" />
+    <input id="lookup-input" type="text" autocomplete="off"
+           placeholder="Type any part of a case number — e.g. 2026 or 2026-3"
+           oninput="onCaseLookupInput(this.value)" />
     <button onclick="lookupCase()">Look Up</button>
   </div>
+  <div id="lookup-suggestions" class="lookup-suggestions" style="display:none;"></div>
   <div id="lookup-result"></div>
 </div>
 
@@ -2681,6 +3640,94 @@ We need clean margins to proceed"></textarea>
     <div id="cc-coord-list"></div>
   </div>
 </div>
+
+<!-- Metrics · By Doctor modal — opened from the appbar 📊 button. -->
+<div class="modal-overlay" id="metrics-modal" onclick="if(event.target===this)closeMetrics()">
+  <div class="modal-panel metrics-panel">
+    <div class="modal-header">
+      <h3>Metrics · By Doctor</h3>
+      <button class="modal-close" onclick="closeMetrics()" aria-label="Close">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="metrics-summary" id="metrics-summary">
+        <!-- populated by JS -->
+      </div>
+      <div class="metrics-controls">
+        <input type="text" class="metrics-search" id="metrics-search"
+               placeholder="Filter by doctor, practice, or strategic partner…"
+               oninput="renderMetricsTable()" />
+        <select class="metrics-sort" id="metrics-sort" onchange="renderMetricsTable()">
+          <option value="total_cases">Sort: Total cases (high → low)</option>
+          <option value="first_yield_pct">Sort: First-yield % (low → high)</option>
+          <option value="median_response_hours">Sort: Slowest response</option>
+          <option value="parts_info_total">Sort: Most parts/info holds</option>
+          <option value="adjustment_cycles_total">Sort: Most adjustment cycles</option>
+          <option value="doctor">Sort: Doctor (A → Z)</option>
+        </select>
+      </div>
+      <div class="metrics-table-wrap" id="metrics-table-wrap">
+        <div class="metrics-loading">Loading metrics…</div>
+      </div>
+      <div class="metrics-footer-note">
+        Response time is measured from the latest send on a queue row to the first matched reply.
+        First-yield % = share of design-approval cases that never required a design-modification round.
+        Parts/info and adjustment counts populate as outreach is generated for those reasons.
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="refresh-btn" onclick="loadMetrics()" style="background: var(--blue);">Refresh</button>
+      <button class="refresh-btn" onclick="closeMetrics()" style="background: var(--slate);">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Call Notes modal — opens when a coordinator clicks "Log Call" in the appbar. -->
+<div class="modal-overlay" id="call-notes-modal" onclick="if(event.target===this)closeCallNotes()">
+  <div class="modal-panel call-notes-panel">
+    <div class="modal-header">
+      <h3>Log a Phone Call</h3>
+      <button class="modal-close" onclick="closeCallNotes()" aria-label="Close">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="cn-row">
+        <div class="cn-field">
+          <label>Case #</label>
+          <input type="text" id="cn-case" placeholder="2026-XXXXX (optional)" />
+        </div>
+        <div class="cn-field">
+          <label>Date / Time</label>
+          <input type="text" id="cn-when" />
+        </div>
+      </div>
+      <div class="cn-row">
+        <div class="cn-field">
+          <label>Spoke with</label>
+          <input type="text" id="cn-with" placeholder="Dr. Smith — 949-555-1234" />
+        </div>
+        <div class="cn-field">
+          <label>Coordinator</label>
+          <input type="text" id="cn-who" placeholder="Your name" />
+        </div>
+      </div>
+      <div class="cn-field cn-full">
+        <label>Call notes</label>
+        <textarea id="cn-notes" rows="10" placeholder="What was discussed? Action items, decisions, follow-ups..."></textarea>
+      </div>
+      <div class="cn-field cn-full">
+        <label>Summary <span class="cn-hint" id="cn-summary-hint">(auto-generated; click Generate to refresh)</span></label>
+        <textarea id="cn-summary" rows="3" placeholder="Click Generate Summary to auto-create from notes, or edit by hand."></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="act slate" onclick="closeCallNotes()">Cancel</button>
+      <button class="act blue" onclick="generateCallSummary()" id="cn-generate-btn">Generate Summary</button>
+      <button class="act approve" onclick="printCallNotes()">Print PDF</button>
+    </div>
+  </div>
+</div>
+
+<!-- Print-only rendering target. Hidden on screen, shown only during window.print(). -->
+<div id="call-notes-print" class="call-notes-print"></div>
 
 <div class="toast" id="toast"></div>
 
