@@ -477,8 +477,36 @@ function renderReady() {
 
 let reschedRows = [];
 async function loadReschedule() {
-  reschedRows = await queryView('v_cases_needing_reschedule');
+  let rows;
+  if (inCowork) {
+    rows = await runMcpSql('SELECT * FROM v_cases_needing_reschedule LIMIT 1000') || [];
+  } else {
+    rows = await restGet('/rest/v1/v_cases_needing_reschedule?select=*&limit=1000') || [];
+  }
+  reschedRows = rows;
   document.getElementById('badge-resched').textContent = reschedRows.length;
+  renderReschedule();
+}
+
+const RESCHED_FILTER_OPTIONS = [
+  { value: '',              label: 'All' },
+  { value: 'pre_approval',  label: 'Pre-approval (doctor hasn\'t replied)' },
+  { value: 'late_approval', label: 'Late approval (doctor approved late)' },
+];
+const reschedFilter = { bucket: '' };
+
+function toggleReschedFilterDd(ev) {
+  if (ev) ev.stopPropagation();
+  document.getElementById('resched-filter-dd')?.classList.toggle('open');
+}
+function closeReschedFilterDd() {
+  document.getElementById('resched-filter-dd')?.classList.remove('open');
+}
+function setReschedFilter(bucket) {
+  reschedFilter.bucket = bucket;
+  const dd = document.getElementById('resched-filter-dd');
+  if (dd) dd.classList.toggle('has-value', !!bucket);
+  closeReschedFilterDd();
   renderReschedule();
 }
 
@@ -490,37 +518,100 @@ function renderReschedule() {
     list.innerHTML = '';
     return;
   }
+
+  // Refresh the bucket-filter dropdown with live counts
+  const counts = {
+    '':              reschedRows.length,
+    pre_approval:    reschedRows.filter(r => r.bucket === 'pre_approval').length,
+    late_approval:   reschedRows.filter(r => r.bucket === 'late_approval').length,
+  };
+  const current = reschedFilter.bucket || '';
+  const labelEl    = document.getElementById('resched-filter-label');
+  const btnCountEl = document.getElementById('resched-filter-count');
+  const menuEl     = document.getElementById('resched-filter-menu');
+  if (labelEl && btnCountEl && menuEl) {
+    const currentOpt = RESCHED_FILTER_OPTIONS.find(o => o.value === current) || RESCHED_FILTER_OPTIONS[0];
+    labelEl.textContent = currentOpt.label;
+    const c = counts[current] ?? reschedRows.length;
+    btnCountEl.textContent = c;
+    btnCountEl.classList.toggle('zero', c === 0);
+    menuEl.innerHTML = RESCHED_FILTER_OPTIONS.map(o => {
+      const n = counts[o.value] ?? 0;
+      const sel = o.value === current ? ' selected' : '';
+      const zero = n === 0 ? ' zero' : '';
+      return `<div class="custom-dd-option${sel}" role="option" data-value="${esc(o.value)}" onclick="setReschedFilter('${o.value}')">
+        <span>${esc(o.label)}</span>
+        <span class="chip-count${zero}">${n}</span>
+      </div>`;
+    }).join('');
+  }
+
+  const filteredRows = current ? reschedRows.filter(r => r.bucket === current) : reschedRows;
+
   summary.innerHTML = '<strong>' + reschedRows.length + '</strong> cases ' +
-    'won\'t make their due date even if approved right now. Push the due date out, or pull the doctor for an urgent approval.';
+    'need rescheduling. <span style="color:var(--slate);">Pre-approval: ' + counts.pre_approval +
+    ' · Late approval: ' + counts.late_approval + '</span>';
+
+  if (!filteredRows.length) {
+    list.innerHTML = '<div class="empty"><strong>No cases match this filter.</strong></div>';
+    return;
+  }
 
   const header = `
     <thead><tr>
-      <th>Pan / Case</th><th>Doctor / Practice</th><th>Patient</th>
-      <th>Original Due</th><th>Earliest Ship</th><th style="text-align:right;">Days Late</th>
+      <th>Pan / Case</th><th>Bucket</th><th>Doctor / Practice</th><th>Patient</th>
+      <th>Original Due</th><th>Earliest Arrival</th>
+      <th style="text-align:right;">Days Late</th>
+      <th style="text-align:right;">Action</th>
     </tr></thead>`;
 
-  const body = reschedRows.map(r => {
+  const body = filteredRows.map(r => {
     const dueDate    = r.doctor_due_date ? new Date(r.doctor_due_date + 'T12:00:00').toLocaleDateString() : '-';
-    const shipDate   = r.earliest_ship_date ? new Date(r.earliest_ship_date + 'T12:00:00').toLocaleDateString() : '-';
+    const arrival    = r.earliest_arrival_date
+      ? new Date(r.earliest_arrival_date + 'T12:00:00').toLocaleDateString()
+      : (r.earliest_ship_date ? new Date(r.earliest_ship_date + 'T12:00:00').toLocaleDateString() : '-');
     const daysClass  = r.days_late >= 14 ? 'severe' : 'warning';
+    const bucketChip = r.bucket === 'late_approval'
+      ? '<span class="bucket-chip late">⚠ Late approval</span>'
+      : '<span class="bucket-chip pre">Pre-approval</span>';
     return `
       <tr>
         <td>
           <div class="pan-cell">${esc(r.pan_number || '-')}</div>
           <div class="case-cell">Case ${esc(r.case_number)}</div>
         </td>
+        <td>${bucketChip}</td>
         <td>
           <div>${esc(r.dr_last_name || '-')}</div>
           <div style="font-size:11px;color:var(--slate);">${esc(r.practice_name || '')}</div>
         </td>
         <td>${esc(r.patient_name || '-')}</td>
         <td>${esc(dueDate)}</td>
-        <td>${esc(shipDate)}</td>
+        <td>${esc(arrival)}</td>
         <td style="text-align:right;"><span class="days-cell ${daysClass}">${r.days_late}d</span></td>
+        <td style="text-align:right;">
+          <button class="resched-action-btn" onclick="queueRescheduleCheck('${esc(r.case_number)}')" title="Draft an email asking the doctor if the new arrival date works">Send reschedule email</button>
+        </td>
       </tr>`;
   }).join('');
 
   list.innerHTML = '<table class="resched-table">' + header + '<tbody>' + body + '</tbody></table>';
+}
+
+// Coordinator clicks "Send reschedule email" in the Reschedule tab.
+// Composes a pending_approval attempt using the reschedule_check template
+// and routes it through the normal review-and-send flow.
+async function queueRescheduleCheck(caseNumber) {
+  if (!confirm('Draft a reschedule check email for case ' + caseNumber + '?\n\nThe draft will appear in Pending Outbound for your review before sending.')) return;
+  try {
+    await callRpc('queue_reschedule_check', { p_case_number: caseNumber });
+    toast('Draft created — open Pending Outbound to review', 'ok');
+    const outboundTab = document.querySelector('#tabs-outreach .tab[data-tab="outbound"]');
+    if (outboundTab) outboundTab.click();
+    await loadAll();
+  } catch (e) {
+    toast('Could not draft: ' + (e?.message || e), 'err');
+  }
 }
 
 function exportReschedule() {
@@ -625,6 +716,115 @@ function esc(s) {
   return String(s).replace(/[&<>"']/g, c => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   }[c]));
+}
+
+// Wrap any bare exocad webview URLs in <a> tags so the link is clickable in
+// the preview even when the email template pasted it as plain text.
+// Also strips the in-body "View Design in exocad WebView" button — the
+// "Direct link" line and the actions-row "View in Exocad" button cover the
+// same job, so the in-body version is redundant noise.
+const EXOCAD_URL_RE = /https?:\/\/webview\.exocad\.com\/v\/[A-Za-z0-9_\-/?=&%.+:#]+/g;
+const EXOCAD_BTN_TEXT_RE = /view\s+design\s+in\s+exocad(\s+webview)?/i;
+function linkifyExocad(html) {
+  if (!html) return html;
+  const container = document.createElement('div');
+  container.innerHTML = html;
+
+  // Remove the in-body styled button(s) that link to exocad.
+  // Targets any <a> whose visible text matches "View Design in exocad[ WebView]".
+  for (const a of Array.from(container.querySelectorAll('a'))) {
+    if (EXOCAD_BTN_TEXT_RE.test((a.textContent || '').trim())) {
+      // Drop the wrapping <p>/<div> only if it has no other useful content.
+      const parent = a.parentElement;
+      a.remove();
+      if (parent && parent !== container
+          && !parent.querySelector('a, img, button')
+          && !(parent.textContent || '').trim()) {
+        parent.remove();
+      }
+    }
+  }
+
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      if (node.parentNode && node.parentNode.closest && node.parentNode.closest('a')) {
+        return NodeFilter.FILTER_REJECT;
+      }
+      return EXOCAD_URL_RE.test(node.nodeValue) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+    }
+  });
+  const targets = [];
+  let n;
+  while ((n = walker.nextNode())) targets.push(n);
+  for (const t of targets) {
+    const frag = document.createDocumentFragment();
+    const txt = t.nodeValue;
+    let last = 0;
+    txt.replace(EXOCAD_URL_RE, (url, idx) => {
+      if (idx > last) frag.appendChild(document.createTextNode(txt.slice(last, idx)));
+      const a = document.createElement('a');
+      a.href = url;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.style.color = '#1882C7';
+      a.style.fontWeight = '600';
+      a.textContent = url;
+      frag.appendChild(a);
+      last = idx + url.length;
+    });
+    if (last < txt.length) frag.appendChild(document.createTextNode(txt.slice(last)));
+    t.parentNode.replaceChild(frag, t);
+  }
+  return container.innerHTML;
+}
+
+// Build the email body for the outbound preview:
+//   1. Run linkifyExocad (strips the redundant "View Design in exocad
+//      WebView" styled button and wraps bare URLs in <a>).
+//   2. If the case has an exocad_viewer_url but the template body never
+//      mentions any exocad URL, inject a "Direct link: <url>" paragraph
+//      right after the sentence "please respond with approval or specific
+//      modification requests." so every card consistently shows the link
+//      in the same spot in the email body. Falls back to prepending if
+//      that sentence isn't found.
+const DIRECT_LINK_ANCHOR_RE = /please\s+respond\s+with\s+approval\s+or\s+specific\s+modification\s+requests/i;
+function buildOutboundBody(rawHtml, exocadUrl) {
+  const cleaned = linkifyExocad(rawHtml || '');
+  if (!exocadUrl || !/^https?:\/\//i.test(exocadUrl)) return cleaned;
+  EXOCAD_URL_RE.lastIndex = 0;
+  if (EXOCAD_URL_RE.test(cleaned)) {
+    EXOCAD_URL_RE.lastIndex = 0;
+    return cleaned;
+  }
+
+  const linkHtml =
+    '<p style="margin: 0 0 10px;">' +
+      '<span style="font-size:11px; color:#6B7785;">Direct link:</span> ' +
+      '<a href="' + esc(exocadUrl) + '" target="_blank" rel="noopener" style="color:#1882C7; word-break:break-all;">' +
+        esc(exocadUrl) +
+      '</a>' +
+    '</p>';
+
+  // Try to insert right after the "please respond..." paragraph
+  const container = document.createElement('div');
+  container.innerHTML = cleaned;
+  let anchor = null;
+  const candidates = container.querySelectorAll('p, div, li');
+  for (const el of candidates) {
+    if (DIRECT_LINK_ANCHOR_RE.test(el.textContent || '')) {
+      anchor = el;
+      break;
+    }
+  }
+  if (anchor) {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = linkHtml;
+    const linkNode = tmp.firstElementChild;
+    anchor.parentNode.insertBefore(linkNode, anchor.nextSibling);
+    return container.innerHTML;
+  }
+  // Fallback: prepend if the anchor sentence is missing
+  return linkHtml + cleaned;
 }
 
 // Sort + filter state for Pending Outbound
@@ -919,7 +1119,6 @@ function renderOutbound() {
             <span class="pan">${esc(r.pan_number || '-')}</span>
             <span class="case-sub">Case ${esc(r.case_number)}</span>
           </span>
-          ${reasonChip}
           ${revenueChip}
           ${partnerChip}
           ${activityChip}
@@ -932,13 +1131,14 @@ function renderOutbound() {
           <div class="stamp attempt-${r.attempt_number}">Attempt ${r.attempt_number}</div>
           <div>Proposed ${fmtDate(r.proposed_at)}</div>
           ${r.patient_name ? '<div>' + esc(r.patient_name) + '</div>' : ''}
+          <div class="meta-reason">${reasonChip}</div>
         </div>
       </div>
       <div class="item-body">
         <div class="outbound-detail-row ${r.account_preferences ? '' : 'no-prefs'}">
           <div class="preview">
             <div class="preview-subject">${esc(r.subject)}</div>
-            ${r.body_html || ''}
+            ${buildOutboundBody(r.body_html, r.exocad_viewer_url)}
           </div>
           ${r.account_preferences || r.prefs_summary_headline ? `
             <div class="prefs-banner">
@@ -966,10 +1166,11 @@ function renderOutbound() {
           </div>
         `}
         <div class="actions">
+          ${hasExocadLink ? `<button class="act view-exocad" onclick="window.open('${esc(r.exocad_viewer_url)}', '_blank', 'noopener')">View in Exocad</button>` : ''}
           <button class="act approve" onclick="approve('${r.attempt_id}')" ${hasExocadLink ? '' : 'disabled title="Add the exocad viewer link first"'}>Approve &amp; Send</button>
           <button class="act edit" onclick="showEdit('${r.attempt_id}')" ${hasExocadLink ? '' : 'disabled title="Add the exocad viewer link first"'}>Edit Then Send</button>
-          <button class="act blue" onclick="resummarize('${r.attempt_id}', '${esc(r.case_number)}')">Auto Resummarize</button>
           <button class="act reject" onclick="reject('${r.attempt_id}')">Reject</button>
+          <button class="act ghost" onclick="resummarize('${r.attempt_id}', '${esc(r.case_number)}')">Auto Resummarize</button>
         </div>
         <div class="edit-form" id="edit-${r.attempt_id}">
           <label>Subject</label>
@@ -983,10 +1184,10 @@ function renderOutbound() {
             <button type="button" onmousedown="event.preventDefault();document.execCommand('insertUnorderedList')">• List</button>
             <button type="button" onmousedown="event.preventDefault();document.execCommand('formatBlock',false,'p')">¶ Paragraph</button>
             <span class="sep"></span>
-            <button type="button" onmousedown="event.preventDefault();const u=prompt('Link URL:');if(u)document.execCommand('createLink',false,u)">🔗 Link</button>
+            <button type="button" onmousedown="event.preventDefault();const u=prompt('Link URL:');if(u)document.execCommand('createLink',false,u)">Link</button>
             <button type="button" onmousedown="event.preventDefault();document.execCommand('removeFormat')">Clear</button>
           </div>
-          <div id="body-${r.attempt_id}" class="email-body-editor" contenteditable="true">${r.body_html || ''}</div>
+          <div id="body-${r.attempt_id}" class="email-body-editor" contenteditable="true">${buildOutboundBody(r.body_html, r.exocad_viewer_url)}</div>
           <label>Reason for edit (optional)</label>
           <input type="text" id="note-${r.attempt_id}" placeholder="e.g. tighter copy, doctor prefers first name" />
           <div class="actions">
@@ -1230,9 +1431,13 @@ function renderHiddenSendersList() {
   `).join('');
 }
 
-// Inbound filter options shared by the custom dropdown
+// Inbound filter options shared by the custom dropdown.
+// Special values: 'linked_only' and 'needs_lookup' filter by case-linkage
+// instead of by AI classification.
 const INBOUND_FILTER_OPTIONS = [
   { value: '',                              label: 'All' },
+  { value: 'linked_only',                   label: 'Linked cases only' },
+  { value: 'needs_lookup',                  label: 'Needs case lookup' },
   { value: 'approved',                      label: 'Approved' },
   { value: 'modification',                  label: 'Modification' },
   { value: 'approved_with_mods',            label: 'Approved + Mods' },
@@ -1274,20 +1479,29 @@ function filteredInbound() {
   const cls = inboundFilter.classification;
   return (state.inbound || []).filter(r => {
     if (isSenderHidden(r.from_email)) return false;
-    if (cls && (r.ai_classification || 'unclear') !== cls) return false;
+    if (cls === 'linked_only'  && !r.case_number) return false;
+    if (cls === 'needs_lookup' &&  r.case_number) return false;
+    if (cls && cls !== 'linked_only' && cls !== 'needs_lookup'
+        && (r.ai_classification || 'unclear') !== cls) return false;
     if (!q) return true;
     const hay = [
       r.case_number, r.from_email, r.practice_name, r.subject,
       r.body_text, r.ai_summary, r.ai_classification, r.patient_name,
-    ].map(v => (v || '').toString().toLowerCase()).join('');
+    ].map(v => (v || '').toString().toLowerCase()).join('  ');
     return hay.includes(q);
   });
 }
 
 function updateInboundChipCounts() {
-  const rows = state.inbound || [];
-  // Bucket each row by its classification (treat missing as 'unclear')
-  const counts = { '': rows.length };
+  // Hidden-sender filtering is part of the user's expected view, so apply it
+  // before counting (otherwise the visible list count and the chip count drift).
+  const rows = (state.inbound || []).filter(r => !isSenderHidden(r.from_email));
+  // Bucket by classification + linkage status
+  const counts = {
+    '':              rows.length,
+    linked_only:     rows.filter(r => !!r.case_number).length,
+    needs_lookup:    rows.filter(r => !r.case_number).length,
+  };
   for (const r of rows) {
     const k = r.ai_classification || 'unclear';
     counts[k] = (counts[k] || 0) + 1;
@@ -1355,6 +1569,9 @@ function renderInbound() {
     const lowConfChip = lowConfMatch
       ? `<span class="match-chip low" title="Auto-matched via ${esc(r.match_method)}">⚠ Low-confidence match</span>`
       : '';
+    const escalationChip = r.needs_escalation
+      ? `<span class="match-chip escalate" title="Looks time-sensitive — consider escalating to the account manager for a phone call">⚡ Time-sensitive — phone call</span>`
+      : '';
     return `
     <div class="item reason-${r.reason || 'design_approval'} ${isUnmatched ? 'unmatched' : ''}" data-id="${r.reply_id}">
       <div class="item-head" onclick="toggleItem('${r.reply_id}')">
@@ -1362,6 +1579,7 @@ function renderInbound() {
           ${matchChip}
           <span class="ai-chip ${r.ai_classification}">${esc(r.ai_classification || 'unclear')}</span>
           ${lowConfChip}
+          ${escalationChip}
           <div class="who">From <strong>${esc(r.from_email)}</strong> · ${esc(r.practice_name || '')}</div>
           <div class="subject">${esc(r.subject)}</div>
           <div style="display:flex;align-items:center;gap:10px;margin-top:6px;">
@@ -1383,7 +1601,7 @@ function renderInbound() {
           return `
             <div class="reply-text">${esc(split.reply || '(no body)')}</div>
             ${hasQuote ? `
-              <button class="reply-thread-toggle" onclick="this.nextElementSibling.classList.toggle('shown'); this.textContent = this.nextElementSibling.classList.contains('shown') ? '▾ Hide quoted email' : '▸ Show quoted email';">▸ Show quoted email</button>
+              <button class="reply-thread-toggle" onclick="this.nextElementSibling.classList.toggle('shown'); this.textContent = this.nextElementSibling.classList.contains('shown') ? 'Hide quoted email' : 'Show quoted email';">Show quoted email</button>
               <div class="reply-thread">${esc(split.quote)}</div>
             ` : ''}
           `;
@@ -1391,10 +1609,11 @@ function renderInbound() {
         ${isUnmatched ? `
           <div class="link-gate">
             <div class="link-gate-title">⚠ No case linked to this reply yet</div>
-            <div class="link-gate-sub">Our matcher couldn't link this email to a case automatically. If you know which case it's about, paste the case number below to link it; otherwise the classify buttons stay disabled.</div>
+            <div class="link-gate-sub">Our matcher couldn't link this email to a case automatically. If you know which case it's about, paste the case number below. If this isn't about any case in our system (general inquiry, wrong inbox, vendor noise), click <strong>No matching case</strong> to triage it out.</div>
             <div class="link-gate-row">
               <input type="text" id="link-input-${r.reply_id}" placeholder="2026-XXXXX" autocomplete="off" />
               <button class="act approve" onclick="manuallyLinkReply('${r.reply_id}', document.getElementById('link-input-${r.reply_id}').value)">Link to case</button>
+              <button class="act slate" onclick="markReplyNoCase('${r.reply_id}')" title="Remove this reply from the queue — no matching case exists in our system">No matching case</button>
             </div>
           </div>
         ` : ''}
@@ -1403,6 +1622,7 @@ function renderInbound() {
           <button class="act blue" onclick="classifyReply('${r.reply_id}', 'approved_with_mods')" ${isUnmatched ? 'disabled title="Link this reply to a case first"' : ''}>Approved + Mods</button>
           <button class="act edit" onclick="classifyReply('${r.reply_id}', 'modification')" ${isUnmatched ? 'disabled title="Link this reply to a case first"' : ''}>Modification</button>
           <button class="act" style="background: var(--gold);" onclick="classifyReply('${r.reply_id}', 'pricing_or_product_question')" ${isUnmatched ? 'disabled title="Link this reply to a case first"' : ''}>Pricing / Product Q</button>
+          <button class="act" style="background: var(--red);" onclick="escalateForCall('${r.reply_id}')" ${isUnmatched ? 'disabled title="Link this reply to a case first"' : ''} title="Escalate to the account manager for a phone call (time-sensitive scheduling/delivery)">Escalate (Call)</button>
           <button class="act slate" onclick="classifyReply('${r.reply_id}', 'other')">Other</button>
         </div>
       </div>
@@ -1551,6 +1771,40 @@ async function manuallyLinkReply(replyId, rawCaseNumber) {
     await loadAll();
   } catch (e) {
     alert('Could not link: ' + (e?.message || e));
+  }
+}
+
+// Escalate a time-sensitive reply to the account manager. The doctor's
+// message is forwarded to the AM with case context, and the queue is flagged
+// 'escalated_am' so it drops out of Pending Replies.
+async function escalateForCall(replyId) {
+  if (!confirm('Escalate to the account manager for a phone call?\n\nThis will email the AM with the doctor\'s message + case context and mark this reply as handled.')) return;
+  try {
+    await callRpc('escalate_reply_for_call', {
+      p_reply_id: replyId,
+      p_coordinator_id: REVIEWER,
+    });
+    toast('Escalated to AM — they\'ll get an email on the next tick', 'ok');
+    await loadAll();
+  } catch (e) {
+    alert('Could not escalate: ' + (e?.message || e));
+  }
+}
+
+// Triage: mark a reply as having no matching case in our system.
+// Drops it out of Pending Replies. Used for general inquiries, wrong-inbox
+// emails, and patients not in our DB.
+async function markReplyNoCase(replyId) {
+  if (!confirm('Mark this reply as "no matching case" and remove it from the queue?\n\nUse this for general inquiries, vendor emails, or doctor questions about patients not in our system.')) return;
+  try {
+    await callRpc('mark_reply_no_case', {
+      p_reply_id: replyId,
+      p_coordinator_id: REVIEWER,
+    });
+    toast('Triaged — removed from queue', 'ok');
+    await loadAll();
+  } catch (e) {
+    alert('Could not triage: ' + (e?.message || e));
   }
 }
 
@@ -1781,6 +2035,8 @@ document.addEventListener('click', (e) => {
   if (partnerDd && !partnerDd.contains(e.target)) partnerDd.classList.remove('open');
   const inboundDd = document.getElementById('inbound-filter-dd');
   if (inboundDd && !inboundDd.contains(e.target)) inboundDd.classList.remove('open');
+  const reschedDd = document.getElementById('resched-filter-dd');
+  if (reschedDd && !reschedDd.contains(e.target)) reschedDd.classList.remove('open');
 });
 
 // =====================================================================
@@ -1929,12 +2185,99 @@ async function submitRequest() {
 // =====================================================================
 // Case Lookup ·timeline of all communications for a case
 // =====================================================================
+// Cached state for the most recently looked-up case so the AI-summary and
+// Print buttons don't have to refetch.
+const caseLookupState = { caseNumber: null, rows: [], caseInfo: null, summary: '' };
+
+// Incremental case-number search. As the coordinator types, we query
+// matching case_number prefixes from "Cases" and render a clickable list.
+// On exact-match (or click), we hand off to lookupCase() for the timeline.
+let _caseLookupDebounce = null;
+function onCaseLookupInput(value) {
+  const v = (value || '').trim();
+  const box = document.getElementById('lookup-suggestions');
+  const result = document.getElementById('lookup-result');
+  if (_caseLookupDebounce) clearTimeout(_caseLookupDebounce);
+  if (!v) {
+    if (box) { box.style.display = 'none'; box.innerHTML = ''; }
+    if (result) result.innerHTML = '';
+    return;
+  }
+  _caseLookupDebounce = setTimeout(() => fetchCaseSuggestions(v), 220);
+}
+
+async function fetchCaseSuggestions(prefix) {
+  const box = document.getElementById('lookup-suggestions');
+  if (!box) return;
+  box.style.display = 'block';
+  box.innerHTML = '<div class="lookup-suggest-loading">Searching…</div>';
+
+  let rows;
+  try {
+    if (inCowork) {
+      const safe = prefix.replace(/'/g, "''");
+      rows = await runMcpSql(
+        `SELECT c."Case Number" AS case_number,
+                NULLIF(TRIM(BOTH FROM (c."Patient First Name" || ' ') || c."Patient Last Name"), '') AS patient_name,
+                a."Last Name" AS dr_last_name,
+                a."Practice Name" AS practice_name,
+                c."Current Step" AS current_step
+         FROM "Cases" c
+         LEFT JOIN "Accounts" a ON a."Account Number" = c."Account Number"
+         WHERE c."Case Number" ILIKE '${safe}%'
+         ORDER BY c."Case Number" DESC
+         LIMIT 25`
+      );
+    } else {
+      rows = await restGet('/rest/v1/v_case_basics?case_number=ilike.' +
+        encodeURIComponent(prefix + '%') +
+        '&order=case_number.desc&limit=25');
+    }
+  } catch (e) {
+    box.innerHTML = '<div class="lookup-suggest-error">Search failed: ' + esc(String(e?.message || e)) + '</div>';
+    return;
+  }
+
+  if (!rows || rows.length === 0) {
+    box.innerHTML = '<div class="lookup-suggest-empty">No cases start with <strong>' + esc(prefix) + '</strong>.</div>';
+    return;
+  }
+
+  // If exactly one match, render the timeline immediately
+  if (rows.length === 1) {
+    box.style.display = 'none';
+    const input = document.getElementById('lookup-input');
+    if (input) input.value = rows[0].case_number;
+    lookupCase();
+    return;
+  }
+
+  // Multiple matches → render clickable list
+  box.innerHTML =
+    '<div class="lookup-suggest-head">' + rows.length + ' matches — click one to open</div>' +
+    rows.map(r => `
+      <div class="lookup-suggest-row" onclick="pickCaseSuggestion('${esc(r.case_number)}')">
+        <span class="ls-case">${esc(r.case_number)}</span>
+        <span class="ls-patient">${esc(r.patient_name || '—')}</span>
+        <span class="ls-dr">${esc(r.dr_last_name || '')}${r.practice_name ? ' · ' + esc(r.practice_name) : ''}</span>
+        <span class="ls-step">${esc(r.current_step || '')}</span>
+      </div>`).join('');
+}
+
+function pickCaseSuggestion(caseNumber) {
+  const input = document.getElementById('lookup-input');
+  if (input) input.value = caseNumber;
+  const box = document.getElementById('lookup-suggestions');
+  if (box) { box.style.display = 'none'; box.innerHTML = ''; }
+  lookupCase();
+}
+
 async function lookupCase() {
   const cn = document.getElementById('lookup-input').value.trim();
   if (!cn) { toast('Enter a case number', 'err'); return; }
   document.getElementById('lookup-result').innerHTML = '<div class="loading">Loading timeline…</div>';
 
-  let rows;
+  let rows, caseInfo;
   if (inCowork) {
     rows = await runMcpSql(
       "SELECT event_id, case_number, event_time, event_type, status, direction, " +
@@ -1942,10 +2285,36 @@ async function lookupCase() {
       "FROM v_case_comms_timeline WHERE case_number = '" + cn.replace(/'/g, "''") + "' " +
       "ORDER BY event_time DESC LIMIT 200"
     );
+    const meta = await runMcpSql(
+      `SELECT c."Case Number" AS case_number,
+              NULLIF(TRIM(BOTH FROM (c."Patient First Name" || ' ') || c."Patient Last Name"), '') AS patient_name,
+              c."Doctor Due Date" AS doctor_due_date,
+              c."Current Step" AS current_step,
+              c."Case Status" AS case_status,
+              c."Hold Reason" AS hold_reason,
+              c."Pan Number" AS pan_number,
+              a."Last Name" AS dr_last_name,
+              a."Practice Name" AS practice_name,
+              a."Primary Email" AS dr_email,
+              a."Account Manager" AS account_manager
+       FROM "Cases" c
+       LEFT JOIN "Accounts" a ON a."Account Number" = c."Account Number"
+       WHERE c."Case Number" = '` + cn.replace(/'/g, "''") + "' LIMIT 1"
+    );
+    caseInfo = (meta && meta[0]) || null;
   } else {
     rows = await restGet('/rest/v1/v_case_comms_timeline?case_number=eq.' +
       encodeURIComponent(cn) + '&order=event_time.desc&limit=200');
+    try {
+      const meta = await restGet('/rest/v1/v_case_basics?case_number=eq.' + encodeURIComponent(cn) + '&limit=1');
+      caseInfo = (meta && meta[0]) || null;
+    } catch { caseInfo = null; }
   }
+
+  caseLookupState.caseNumber = cn;
+  caseLookupState.rows = rows || [];
+  caseLookupState.caseInfo = caseInfo;
+  caseLookupState.summary = '';
 
   if (!rows || rows.length === 0) {
     document.getElementById('lookup-result').innerHTML =
@@ -1965,12 +2334,34 @@ async function lookupCase() {
     }
   }
 
+  // Case info bar — pulls from caseInfo if we got it, falls back to "–"
+  const ci = caseInfo || {};
+  const dueDate = ci.doctor_due_date ? new Date(ci.doctor_due_date + 'T12:00:00').toLocaleDateString() : '–';
+  const caseInfoBar = `
+    <div class="lookup-case-info">
+      <div><div class="ci-label">Patient</div><div class="ci-value">${esc(ci.patient_name || '–')}</div></div>
+      <div><div class="ci-label">Doctor</div><div class="ci-value">${esc(ci.dr_last_name || '–')}</div></div>
+      <div><div class="ci-label">Practice</div><div class="ci-value">${esc(ci.practice_name || '–')}</div></div>
+      <div><div class="ci-label">Current Step</div><div class="ci-value">${esc(ci.current_step || '–')}</div></div>
+      <div><div class="ci-label">Doctor Due</div><div class="ci-value">${esc(dueDate)}</div></div>
+      <div><div class="ci-label">Case Status</div><div class="ci-value">${esc(ci.case_status || '–')}</div></div>
+    </div>`;
+
   const header = `
     <div class="lookup-header">
       <div><div class="label">Case</div><div class="value">${esc(cn)}</div></div>
       <div><div class="label">Outbound</div><div class="value">${counts.outbound || 0}</div></div>
       <div><div class="label">Inbound</div><div class="value">${counts.inbound || 0}</div></div>
       <div><div class="label">First / Last</div><div class="value" style="font-size:11px;">${firstSeen ? firstSeen.toLocaleDateString() : '–'} → ${lastSeen ? lastSeen.toLocaleDateString() : '–'}</div></div>
+      <div class="lookup-actions">
+        <button class="act blue" onclick="generateCaseSummary()" id="case-summary-btn">Generate AI Summary</button>
+        <button class="act approve" onclick="printCaseLookup()">Print PDF</button>
+      </div>
+    </div>
+    ${caseInfoBar}
+    <div id="case-summary-box" class="case-summary-box" style="display:none;">
+      <div class="case-summary-label">AI Summary</div>
+      <div id="case-summary-text"></div>
     </div>`;
 
   const events = rows.map(r => {
@@ -2003,6 +2394,128 @@ async function lookupCase() {
 
   document.getElementById('lookup-result').innerHTML =
     header + '<div class="timeline">' + events + '</div>';
+}
+
+// Build a plain-text transcript of the case's communications for AI input
+function _caseTimelineToText(rows) {
+  // Oldest first reads more naturally for the summarizer
+  const ordered = (rows || []).slice().sort((a, b) =>
+    new Date(a.event_time || 0) - new Date(b.event_time || 0));
+  return ordered.map(r => {
+    const t = r.event_time ? new Date(r.event_time).toLocaleString() : '';
+    const who = r.counterparty || r.actor || '';
+    const dir = r.direction === 'outbound' ? 'WE SENT' : r.direction === 'inbound' ? 'THEY SAID' : 'INTERNAL';
+    const subj = r.subject ? ' — ' + r.subject : '';
+    const body = (r.body || '').replace(/\s+/g, ' ').trim().slice(0, 1200);
+    return `[${t}] ${dir} (${(r.event_type || '').replace(/_/g, ' ')}) ${who}${subj}\n${body}`;
+  }).join('\n\n');
+}
+
+async function generateCaseSummary() {
+  const rows = caseLookupState.rows || [];
+  if (!rows.length) { toast('Look up a case first', 'err'); return; }
+  const btn = document.getElementById('case-summary-btn');
+  const box = document.getElementById('case-summary-box');
+  const txt = document.getElementById('case-summary-text');
+  if (btn) { btn.disabled = true; btn.textContent = 'Generating…'; }
+  try {
+    const transcript = _caseTimelineToText(rows);
+    const ci = caseLookupState.caseInfo || {};
+    const prompt = `You are summarizing the complete communication history for a dental lab case.
+
+Case: ${caseLookupState.caseNumber || ''}
+Patient: ${ci.patient_name || ''}
+Doctor: ${ci.dr_last_name || ''} (${ci.practice_name || ''})
+Current step: ${ci.current_step || ''}
+Doctor due date: ${ci.doctor_due_date || ''}
+
+Write a 4-6 sentence narrative summary that a coordinator could use to get up to speed in 30 seconds. Cover:
+- What the case is about (in plain language)
+- Key decisions / status changes
+- Most recent outbound + inbound communication
+- Any open action items or blockers
+- Whether the case is on track for the due date
+
+Be specific. Plain text, no bullet points, no markdown.
+
+Communication history (oldest first):
+"""
+${transcript.slice(0, 14000)}
+"""
+
+Summary:`;
+    const out = await callAnthropic(prompt, 500);
+    caseLookupState.summary = (out || '').trim();
+    if (txt) txt.textContent = caseLookupState.summary;
+    if (box) box.style.display = 'block';
+  } catch (e) {
+    toast('Could not generate summary: ' + (e?.message || e), 'err');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Regenerate Summary'; }
+  }
+}
+
+function printCaseLookup() {
+  const rows = caseLookupState.rows || [];
+  if (!rows.length) { toast('Look up a case first', 'err'); return; }
+  const cn  = caseLookupState.caseNumber || '';
+  const ci  = caseLookupState.caseInfo || {};
+  const sum = caseLookupState.summary || '';
+  const dueDate = ci.doctor_due_date
+    ? new Date(ci.doctor_due_date + 'T12:00:00').toLocaleDateString()
+    : '–';
+
+  const ordered = rows.slice().sort((a, b) =>
+    new Date(a.event_time || 0) - new Date(b.event_time || 0));
+
+  const eventsHtml = ordered.map(r => {
+    const t   = r.event_time ? new Date(r.event_time) : null;
+    const stamp = t ? t.toLocaleDateString() + ' ' + t.toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}) : '';
+    const dirLabel = r.direction === 'outbound' ? 'Outbound' :
+                     r.direction === 'inbound'  ? 'Inbound'  : 'Internal';
+    const who = r.counterparty || r.actor || '';
+    const typeLabel = (r.event_type || '').replace(/_/g, ' ');
+    return `
+      <div class="cnp-event">
+        <div class="cnp-event-head">
+          <span class="cnp-event-type">${esc(dirLabel)} · ${esc(typeLabel)}</span>
+          <span class="cnp-event-time">${esc(stamp)}</span>
+        </div>
+        ${who ? `<div class="cnp-event-who">${esc(r.direction === 'inbound' ? 'From: ' : 'To: ')}${esc(who)}</div>` : ''}
+        ${r.subject ? `<div class="cnp-event-subj">${esc(r.subject)}</div>` : ''}
+        ${r.body ? `<div class="cnp-event-body">${esc(r.body)}</div>` : ''}
+        ${r.note ? `<div class="cnp-event-note"><em>${esc(r.note)}</em></div>` : ''}
+      </div>`;
+  }).join('');
+
+  const target = document.getElementById('call-notes-print');
+  target.innerHTML = `
+    <div class="cnp-header">
+      <div class="cnp-brand">Spectrum Killian<small>Case Communication Record</small></div>
+      <div class="cnp-date">${esc(new Date().toLocaleString())}</div>
+    </div>
+    <h2>Case ${esc(cn)}</h2>
+    <div class="cnp-meta">
+      <div><strong>Patient:</strong> ${esc(ci.patient_name || '–')}</div>
+      <div><strong>Doctor:</strong> ${esc(ci.dr_last_name || '–')}</div>
+      <div><strong>Practice:</strong> ${esc(ci.practice_name || '–')}</div>
+      <div><strong>Current Step:</strong> ${esc(ci.current_step || '–')}</div>
+      <div><strong>Doctor Due Date:</strong> ${esc(dueDate)}</div>
+      <div><strong>Case Status:</strong> ${esc(ci.case_status || '–')}</div>
+      ${ci.account_manager ? '<div><strong>Account Manager:</strong> ' + esc(ci.account_manager) + '</div>' : ''}
+      ${ci.pan_number ? '<div><strong>PAN:</strong> ' + esc(ci.pan_number) + '</div>' : ''}
+    </div>
+    ${sum ? `
+      <div class="cnp-section-label">AI Summary</div>
+      <div class="cnp-summary">${esc(sum)}</div>
+    ` : ''}
+    <div class="cnp-section-label">Communication Timeline (${ordered.length} events, oldest first)</div>
+    ${eventsHtml}
+    <div class="cnp-footer">
+      Spectrum Killian Dental Lab Alliance · Printed ${new Date().toLocaleString()}
+    </div>
+  `;
+  setTimeout(() => window.print(), 80);
 }
 
 // Enter key triggers lookup
@@ -2717,7 +3230,7 @@ function selectPrefAcct(acctNum) {
       '</div>' +
       '<div style="display:flex; gap:10px; margin-top:18px; flex-wrap:wrap;">' +
         '<button onclick="savePrefs(\'' + esc(p.account_number) + '\')" class="cc-btn-primary" style="margin-top:0;">Save Preferences</button>' +
-        '<button onclick="extractPrefsWithAI(\'' + esc(p.account_number) + '\')" class="cc-btn-primary" style="margin-top:0;background:#9A7B2E;">✨ Auto-extract</button>' +
+        '<button onclick="extractPrefsWithAI(\'' + esc(p.account_number) + '\')" class="cc-btn-primary" style="margin-top:0;background:#9A7B2E;">Auto-extract</button>' +
         (p.derived_from_accounts ? '<button onclick="bulkExtractPrefs()" class="cc-btn-primary" style="margin-top:0;background:var(--slate);">Bulk: Extract All Auto Rows</button>' : '') +
       '</div>' +
       (p.raw_case_entry_pref || p.raw_dr_pref ? (
@@ -3011,11 +3524,23 @@ const TOUR_STEPS = [
   { title: "What you see here", body: "Every draft email is queued here for your review before it sends.",
     selector: '#panel-outbound', placement: 'top' },
   { title: "Pan number first", body: "Each row leads with the Pan number. Case number sits underneath in smaller text.",
-    selector: '#panel-outbound .item:first-child .case-id-block', placement: 'right' },
+    selector: '#panel-outbound .item .case-id-block', placement: 'right',
+    beforeShow: () => {
+      const t = document.querySelector('#tabs-outreach .tab[data-tab="outbound"]');
+      if (t && !t.classList.contains('active')) t.click();
+    } },
   { title: "Status chips", body: "Colored chips flag the reason for sending, a recent doctor reply, recent case activity, or due date risk.",
-    selector: '#panel-outbound .item:first-child .item-head', placement: 'bottom' },
+    selector: '#panel-outbound .item .item-head', placement: 'bottom',
+    beforeShow: () => {
+      const t = document.querySelector('#tabs-outreach .tab[data-tab="outbound"]');
+      if (t && !t.classList.contains('active')) t.click();
+    } },
   { title: "Expand a row", body: "Click any row to open the full email and the preferences panel. Click the first row now to keep going.",
-    selector: '#panel-outbound .item:first-child .item-head', placement: 'bottom', requireClick: true },
+    selector: '#panel-outbound .item .item-head', placement: 'bottom', requireClick: true,
+    beforeShow: () => {
+      const t = document.querySelector('#tabs-outreach .tab[data-tab="outbound"]');
+      if (t && !t.classList.contains('active')) t.click();
+    } },
   { title: "Email preview", body: "This is the rendered draft email. Subject up top, body below.",
     selector: '#panel-outbound .item.expanded .preview', placement: 'right',
     beforeShow: () => {
@@ -3171,11 +3696,7 @@ function tourBack() {
 }
 function tourKeys(e) {
   if (e.key === 'Escape') endTour();
-  else if (e.key === 'ArrowRight' || e.key === 'Enter') {
-    // Only allow keyboard next if not click-required
-    const step = TOUR_STEPS[tourStep];
-    if (!step.requireClick) tourNext();
-  }
+  else if (e.key === 'ArrowRight' || e.key === 'Enter') tourNext();
   else if (e.key === 'ArrowLeft') tourBack();
 }
 
@@ -3205,24 +3726,25 @@ function showTourStep() {
   if (step.beforeShow) {
     try { step.beforeShow(); } catch (e) {}
   }
+  // Steps that used to require a user click (tab switches, row expands)
+  // now auto-click the target so the panel/state is already in the right
+  // place when the tooltip shows. Coordinator just hits Next to advance.
+  if (step.requireClick && step.selector) {
+    const el = document.querySelector(step.selector);
+    if (el && typeof el.click === 'function') {
+      try { el.click(); } catch (e) {}
+    }
+  }
   document.getElementById('tour-step-meta').textContent = 'Step ' + (tourStep + 1) + ' of ' + TOUR_STEPS.length;
   document.getElementById('tour-title').textContent = step.title;
   document.getElementById('tour-body').innerHTML = step.body;
   document.getElementById('tour-back').style.visibility = tourStep === 0 ? 'hidden' : 'visible';
 
   const nextBtn = document.getElementById('tour-next');
-  if (step.requireClick && step.selector) {
-    nextBtn.textContent = '👆 Click highlighted';
-    nextBtn.disabled = true;
-    nextBtn.style.opacity = '0.45';
-    nextBtn.style.cursor = 'not-allowed';
-    attachClickRequirement(step.selector);
-  } else {
-    nextBtn.textContent = tourStep === TOUR_STEPS.length - 1 ? 'Finish' : 'Next ›';
-    nextBtn.disabled = false;
-    nextBtn.style.opacity = '';
-    nextBtn.style.cursor = '';
-  }
+  nextBtn.textContent = tourStep === TOUR_STEPS.length - 1 ? 'Finish' : 'Next ›';
+  nextBtn.disabled = false;
+  nextBtn.style.opacity = '';
+  nextBtn.style.cursor = '';
 
   // Scroll the target into view so the spotlight is on-screen
   if (step.selector && step.placement !== 'center') {
@@ -3251,7 +3773,24 @@ function positionTour() {
   }
 
   const el = document.querySelector(step.selector);
-  if (!el) { sp.style.display = 'none'; tt.classList.add('center'); return; }
+  if (!el) {
+    // Element not in DOM yet (tab just switched, async render not finished).
+    // Retry a few times before falling back to center placement.
+    if (!step._retryCount) step._retryCount = 0;
+    if (step._retryCount < 8) {
+      step._retryCount++;
+      sp.style.display = 'none';
+      setTimeout(positionTour, 150);
+      return;
+    }
+    step._retryCount = 0;
+    sp.style.display = 'none';
+    tt.classList.add('center');
+    tt.style.top = '50%';
+    tt.style.left = '50%';
+    return;
+  }
+  step._retryCount = 0;
   const r = el.getBoundingClientRect();
   const pad = 6;
   sp.style.display = 'block';
@@ -3317,6 +3856,283 @@ function positionTour() {
   }
 })();
 
+// =====================================================================
+// Metrics — by-doctor KPIs from v_dr_outreach_metrics_by_doctor.
+// Opens as a modal from the gold "Metrics" button in the appbar.
+// Lazy-loads on open; caches rows in metricsRows for client-side sort/filter.
+// =====================================================================
+let metricsRows = null;
+
+async function openMetrics() {
+  const modal = document.getElementById('metrics-modal');
+  if (!modal) return;
+  modal.classList.add('open');
+  if (!metricsRows) {
+    await loadMetrics();
+  } else {
+    renderMetricsTable();
+  }
+}
+
+function closeMetrics() {
+  document.getElementById('metrics-modal')?.classList.remove('open');
+}
+
+async function loadMetrics() {
+  const wrap = document.getElementById('metrics-table-wrap');
+  if (wrap) wrap.innerHTML = '<div class="metrics-loading">Loading metrics…</div>';
+  try {
+    const rows = await restGet('/rest/v1/v_dr_outreach_metrics_by_doctor?select=*&limit=2000');
+    metricsRows = rows || [];
+    renderMetricsSummary();
+    renderMetricsTable();
+  } catch (err) {
+    if (wrap) wrap.innerHTML = '<div class="metrics-empty">Could not load metrics: ' + esc(String(err.message || err)) + '</div>';
+  }
+}
+
+function renderMetricsSummary() {
+  const el = document.getElementById('metrics-summary');
+  if (!el || !metricsRows) return;
+  const rows = metricsRows;
+  const totalDoctors = rows.length;
+  const totalCases   = rows.reduce((s, r) => s + (Number(r.total_cases) || 0), 0);
+
+  const respRows = rows.filter(r => r.median_response_hours != null && r.reply_sample_size > 0);
+  let medianResp = null;
+  if (respRows.length) {
+    const totalW = respRows.reduce((s, r) => s + r.reply_sample_size, 0);
+    medianResp = respRows.reduce((s, r) => s + r.median_response_hours * r.reply_sample_size, 0) / totalW;
+  }
+
+  const fyRows = rows.filter(r => r.first_yield_pct != null && r.design_approval_cases > 0);
+  let avgYield = null;
+  if (fyRows.length) {
+    const totalW = fyRows.reduce((s, r) => s + r.design_approval_cases, 0);
+    avgYield = fyRows.reduce((s, r) => s + r.first_yield_pct * r.design_approval_cases, 0) / totalW;
+  }
+
+  const partsInfoTotal = rows.reduce((s, r) => s + (Number(r.parts_info_total) || 0), 0);
+  const adjustmentsTotal = rows.reduce((s, r) => s + (Number(r.adjustment_cycles_total) || 0), 0);
+
+  el.innerHTML =
+    tile('Doctors tracked', String(totalDoctors), totalCases + ' cases total') +
+    tile('Median response',
+         medianResp == null ? '—' : formatHours(medianResp),
+         medianResp == null ? 'no replies yet' : respRows.length + ' doctors w/ replies') +
+    tile('First-yield rate',
+         avgYield == null ? '—' : avgYield.toFixed(1) + '%',
+         avgYield == null ? 'no design approvals yet' : 'weighted avg') +
+    tile('Holds + adjustments',
+         (partsInfoTotal + adjustmentsTotal).toString(),
+         partsInfoTotal + ' parts/info · ' + adjustmentsTotal + ' adjustments');
+
+  function tile(label, value, sub) {
+    return '<div class="metrics-summary-tile">' +
+             '<span class="label">' + esc(label) + '</span>' +
+             '<span class="value">' + esc(value) + '</span>' +
+             '<span class="sub">' + esc(sub) + '</span>' +
+           '</div>';
+  }
+}
+
+function renderMetricsTable() {
+  const wrap = document.getElementById('metrics-table-wrap');
+  if (!wrap || !metricsRows) return;
+  const q = (document.getElementById('metrics-search')?.value || '').trim().toLowerCase();
+  const sortKey = document.getElementById('metrics-sort')?.value || 'total_cases';
+
+  let rows = metricsRows.slice();
+  if (q) {
+    rows = rows.filter(r =>
+      (r.doctor || '').toLowerCase().includes(q) ||
+      (r.practice_name || '').toLowerCase().includes(q) ||
+      (r.strategic_partner || '').toLowerCase().includes(q) ||
+      (r.account_manager || '').toLowerCase().includes(q)
+    );
+  }
+
+  rows.sort((a, b) => {
+    if (sortKey === 'doctor') return (a.doctor || '').localeCompare(b.doctor || '');
+    if (sortKey === 'first_yield_pct') {
+      const av = a.first_yield_pct == null ? 999 : a.first_yield_pct;
+      const bv = b.first_yield_pct == null ? 999 : b.first_yield_pct;
+      return av - bv;
+    }
+    if (sortKey === 'median_response_hours') {
+      const av = a.median_response_hours == null ? -1 : a.median_response_hours;
+      const bv = b.median_response_hours == null ? -1 : b.median_response_hours;
+      return bv - av;
+    }
+    return (Number(b[sortKey]) || 0) - (Number(a[sortKey]) || 0);
+  });
+
+  if (!rows.length) {
+    wrap.innerHTML = '<div class="metrics-empty">No doctors match this filter.</div>';
+    return;
+  }
+
+  let html =
+    '<table class="metrics-table">' +
+      '<thead><tr>' +
+        '<th>Doctor / Practice</th>' +
+        '<th class="numeric">Cases</th>' +
+        '<th class="numeric">Median<br>response</th>' +
+        '<th class="numeric">First-yield<br>%</th>' +
+        '<th class="numeric">Parts /<br>info holds</th>' +
+        '<th class="numeric">Avg hold<br>duration</th>' +
+        '<th class="numeric">Adjustment<br>cycles</th>' +
+      '</tr></thead><tbody>';
+
+  for (const r of rows) {
+    html +=
+      '<tr>' +
+        '<td>' +
+          '<div class="doctor-cell">' +
+            '<span class="name">' + esc(r.doctor || '—') + '</span>' +
+            (r.practice_name && r.practice_name !== r.doctor
+              ? '<span class="practice">' + esc(r.practice_name) + '</span>' : '') +
+            (r.strategic_partner
+              ? '<span class="practice"><span class="partner-chip">' + esc(r.strategic_partner) + '</span></span>' : '') +
+          '</div>' +
+        '</td>' +
+        '<td class="numeric"><strong>' + (r.total_cases || 0) + '</strong></td>' +
+        '<td class="numeric">' + (
+          r.median_response_hours == null
+            ? '<span class="metric-empty">no replies</span>'
+            : formatHours(r.median_response_hours) +
+              '<div style="font-size:10px;color:var(--slate);">n=' + r.reply_sample_size + '</div>'
+        ) + '</td>' +
+        '<td class="numeric">' + yieldPill(r.first_yield_pct, r.design_approval_cases) + '</td>' +
+        '<td class="numeric">' + (
+          (Number(r.parts_info_total) || 0) === 0
+            ? '<span class="metric-empty">0</span>'
+            : '<strong>' + r.parts_info_total + '</strong>' +
+              '<div style="font-size:10px;color:var(--slate);">' +
+              (r.waiting_parts_count || 0) + ' parts · ' +
+              (r.missing_info_count || 0) + ' info</div>'
+        ) + '</td>' +
+        '<td class="numeric duration-cell">' + (
+          r.avg_parts_info_days == null
+            ? '<span class="metric-empty">—</span>'
+            : '<span class="dur-days">' + Number(r.avg_parts_info_days).toFixed(1) + ' days</span>' +
+              '<div class="dur-sub">avg per hold</div>'
+        ) + '</td>' +
+        '<td class="numeric">' + (
+          (Number(r.adjustment_cycles_total) || 0) === 0
+            ? '<span class="metric-empty">0</span>'
+            : '<strong>' + r.adjustment_cycles_total + '</strong>' +
+              (r.avg_adjustment_cycles_per_case
+                ? '<div style="font-size:10px;color:var(--slate);">' +
+                  Number(r.avg_adjustment_cycles_per_case).toFixed(2) + ' per case</div>'
+                : '')
+        ) + '</td>' +
+      '</tr>';
+  }
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}
+
+function yieldPill(pct, sample) {
+  if (pct == null || !sample) return '<span class="yield-pill muted">no data</span>';
+  const cls = pct >= 85 ? 'good' : pct >= 65 ? 'okay' : 'bad';
+  return '<span class="yield-pill ' + cls + '">' + Number(pct).toFixed(1) + '%</span>' +
+         '<div style="font-size:10px;color:var(--slate);margin-top:2px;">n=' + sample + '</div>';
+}
+
+function formatHours(h) {
+  if (h == null) return '—';
+  const hours = Number(h);
+  if (hours < 1)   return Math.round(hours * 60) + ' min';
+  if (hours < 24)  return hours.toFixed(1) + ' hr';
+  return (hours / 24).toFixed(1) + ' days';
+}
+
+// =====================================================================
+// Call Notes — modal that lets a coordinator log a phone call, get an AI
+// summary, and print a styled PDF (browser print → save as PDF).
+// =====================================================================
+function openCallNotes(prefillCaseNumber) {
+  const modal = document.getElementById('call-notes-modal');
+  if (!modal) return;
+  document.getElementById('cn-case').value    = prefillCaseNumber || '';
+  document.getElementById('cn-when').value    = new Date().toLocaleString('en-US', {
+    year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
+  });
+  document.getElementById('cn-with').value    = '';
+  document.getElementById('cn-who').value     = localStorage.getItem('skdla_reviewer') || '';
+  document.getElementById('cn-notes').value   = '';
+  document.getElementById('cn-summary').value = '';
+  modal.classList.add('open');
+  setTimeout(() => document.getElementById('cn-notes')?.focus(), 60);
+}
+
+function closeCallNotes() {
+  document.getElementById('call-notes-modal')?.classList.remove('open');
+}
+
+async function generateCallSummary() {
+  const notes = document.getElementById('cn-notes').value.trim();
+  const hint  = document.getElementById('cn-summary-hint');
+  const btn   = document.getElementById('cn-generate-btn');
+  const summaryEl = document.getElementById('cn-summary');
+  if (!notes) { toast('Type the call notes first', 'err'); return; }
+  if (hint) hint.textContent = '(generating…)';
+  if (btn)  btn.disabled = true;
+  try {
+    const prompt = `Summarize the following phone-call notes between a dental lab coordinator and a dentist's office in 2-3 sentences. Be specific about decisions made, action items, and any follow-ups required. Plain text, no bullet points, no markdown.
+
+Notes:
+"""
+${notes}
+"""
+
+Summary:`;
+    const out = await callAnthropic(prompt, 350);
+    summaryEl.value = (out || '').trim();
+    if (hint) hint.textContent = '(auto-generated; you can edit before printing)';
+  } catch (e) {
+    if (hint) hint.textContent = '(could not generate — type a summary by hand)';
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function printCallNotes() {
+  const caseNum = document.getElementById('cn-case').value.trim();
+  const when    = document.getElementById('cn-when').value.trim();
+  const wth     = document.getElementById('cn-with').value.trim();
+  const who     = document.getElementById('cn-who').value.trim();
+  const notes   = document.getElementById('cn-notes').value.trim();
+  const summary = document.getElementById('cn-summary').value.trim();
+  if (!notes) { toast('Notes are empty — nothing to print', 'err'); return; }
+
+  const target = document.getElementById('call-notes-print');
+  target.innerHTML = `
+    <div class="cnp-header">
+      <div class="cnp-brand">Spectrum Killian<small>Design Approvals · Phone Call Record</small></div>
+      <div class="cnp-date">${esc(when || new Date().toLocaleString())}</div>
+    </div>
+    <h2>Phone Call Notes${caseNum ? ' — Case ' + esc(caseNum) : ''}</h2>
+    <div class="cnp-meta">
+      ${caseNum ? '<div><strong>Case:</strong> ' + esc(caseNum) + '</div>' : ''}
+      ${wth ? '<div><strong>Spoke with:</strong> ' + esc(wth) + '</div>' : ''}
+      ${who ? '<div><strong>Coordinator:</strong> ' + esc(who) + '</div>' : ''}
+      <div><strong>Date / Time:</strong> ${esc(when || new Date().toLocaleString())}</div>
+    </div>
+    ${summary ? `
+      <div class="cnp-section-label">Summary</div>
+      <div class="cnp-summary">${esc(summary)}</div>
+    ` : ''}
+    <div class="cnp-section-label">Full Notes</div>
+    <div class="cnp-body">${esc(notes)}</div>
+    <div class="cnp-footer">
+      Spectrum Killian Dental Lab Alliance · Generated ${new Date().toLocaleString()}
+    </div>
+  `;
+  setTimeout(() => window.print(), 80);
+}
+
 // main.js is a type="module" — top-level declarations are scoped to the module
 // and not visible in the global window. Inline onclick="fn()" handlers need
 // these functions on window, so we assign them explicitly here.
@@ -3340,11 +4156,15 @@ Object.assign(window, {
   // Outbound actions
   toggleItem, approve, showEdit, hideEdit, resummarize, reject, saveEdit, saveExocadLink,
   // Inbound actions
-  classifyReply, manuallyLinkReply,
+  classifyReply, manuallyLinkReply, escalateForCall, markReplyNoCase,
+  // Reschedule filters / actions
+  toggleReschedFilterDd, closeReschedFilterDd, setReschedFilter, queueRescheduleCheck,
   // Audit / misc
   exportReschedule, setAuditWindow,
   // Outreach panels
-  lookupCase, submitFeedback, submitRequest,
+  lookupCase, generateCaseSummary, printCaseLookup,
+  onCaseLookupInput, pickCaseSuggestion,
+  submitFeedback, submitRequest,
   // Case Coordination
   setCaseTab, submitLog, exportFPY, deleteLogEntry,
   setTrackerSubTab, addCaseToTracker,
@@ -3352,4 +4172,8 @@ Object.assign(window, {
   renderDashboard, renderHistory, renderTracker, renderPrefsList,
   addCoordinator, removeCoord, selectPrefAcct, savePrefs, extractPrefsWithAI, bulkExtractPrefs,
   generatePrefSummaries,
+  // Metrics modal
+  openMetrics, closeMetrics, loadMetrics, renderMetricsTable,
+  // Call Notes modal
+  openCallNotes, closeCallNotes, generateCallSummary, printCallNotes,
 });
