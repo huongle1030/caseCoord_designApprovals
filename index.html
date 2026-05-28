@@ -92,16 +92,14 @@
   .app-switcher .app-item:last-child { border-bottom: none; }
   .app-switcher .app-item:hover { background: var(--pale); }
   .app-switcher .app-mark {
-    width: 22px; height: 22px; border-radius: 4px;
-    background: var(--blue); position: relative;
-    transform: rotate(45deg); flex-shrink: 0;
+    width: 33px; height: 33px;
+    background: url('/skdla_logo.png') no-repeat center / contain;
+    flex-shrink: 0;
   }
-  .app-switcher .app-mark::after {
-    content: ''; position: absolute; inset: 5px;
-    background: var(--white); border: 2px solid var(--blue);
+  .app-switcher .app-mark::after { display: none; }
+  .app-switcher .app-mark.cc {
+    background: url('/skdla_logo.png') no-repeat center / contain;
   }
-  .app-switcher .app-mark.cc { background: var(--gold); }
-  .app-switcher .app-mark.cc::after { border-color: var(--gold); }
   .app-switcher .app-info {
     flex: 1; display: flex; flex-direction: column; gap: 1px;
   }
@@ -125,15 +123,10 @@
     letter-spacing: 1.5px; text-transform: uppercase;
   }
   .mark {
-    width: 28px; height: 28px;
-    background: var(--blue); border-radius: 4px;
-    position: relative; transform: rotate(45deg);
+    width: 48px; height: 48px;
+    background: url('/skdla_logo.png') no-repeat center / contain;
   }
-  .mark::after {
-    content: '';
-    position: absolute; inset: 6px;
-    background: var(--navy); border: 2px solid var(--blue);
-  }
+  .mark::after { display: none; }
   .brand-text .name {
     font-weight: 700; font-size: 15px; letter-spacing: 2.5px;
     text-transform: uppercase; display: block;
@@ -776,7 +769,7 @@
     color: var(--slate); letter-spacing: 2px;
     text-transform: uppercase; margin-bottom: 6px;
   }
-  .cc-form-card .req::after { content: ' *'; color: var(--blue); }
+  .cc-form-card .req::after { content: ' *'; color: var(--red); font-size: 15px; font-weight: 800; vertical-align: middle; }
   .cc-btn-primary {
     background: var(--blue); color: white; border: none;
     padding: 11px 22px; border-radius: 8px;
@@ -916,15 +909,15 @@
     margin-bottom: 22px;
   }
   .wf-flow {
-    display: flex; align-items: center; flex-wrap: wrap;
-    gap: 6px; justify-content: flex-start;
+    display: flex; flex-direction: column;
+    align-items: center; gap: 6px;
   }
   .wf-node {
     background: #EFF6FB; border: 1.5px solid #BAE6FD;
     color: var(--navy);
     padding: 10px 14px; border-radius: 10px;
     font-size: 12px; font-weight: 700;
-    min-width: 110px; text-align: center;
+    min-width: 160px; text-align: center;
   }
   .wf-node.start { background: #E0F2FE; border-color: #7DD3FC; }
   .wf-node.hold  { background: #FEF3C7; border-color: #FDE68A; color: #92400E; }
@@ -932,15 +925,17 @@
   .wf-node.change  { background: #FEE4E4; border-color: #FBC7C7; color: #B91C1C; }
   .wf-arrow {
     color: var(--slate); font-size: 18px; font-weight: 800;
-    padding: 0 2px;
+    line-height: 1; padding: 2px 0;
   }
   .wf-branch {
-    display: flex; flex-direction: column; gap: 8px;
-    padding-left: 8px; border-left: 2px dashed var(--slate-light);
-    margin-left: 8px;
+    display: flex; flex-direction: row;
+    align-items: flex-start; justify-content: center;
+    gap: 28px; margin-top: 4px;
   }
-  .wf-branch .wf-branch-row {
-    display: flex; align-items: center; gap: 6px;
+  .wf-branch .wf-branch-col {
+    display: flex; flex-direction: column;
+    align-items: center; gap: 6px;
+    min-width: 170px;
   }
 
   /* ============================================================
@@ -2160,10 +2155,10 @@
 <div class="tabs hidden" id="tabs-cc">
   <div class="tab active" data-cc-tab="dashboard">Dashboard</div>
   <div class="tab" data-cc-tab="newlog">New Log</div>
-  <div class="tab" data-cc-tab="history">History <span class="badge" id="badge-history">–</span></div>
-  <div class="tab" data-cc-tab="tracker">Case Tracker <span class="badge" id="badge-tracker">–</span></div>
-  <div class="tab" data-cc-tab="coordinators">Coordinators <span class="badge" id="badge-coords">–</span></div>
-  <div class="tab" data-cc-tab="prefs">Preferences <span class="badge" id="badge-prefs">–</span></div>
+  <div class="tab" data-cc-tab="history">History</div>
+  <div class="tab" data-cc-tab="tracker">Case Tracker</div>
+  <div class="tab" data-cc-tab="coordinators">Coordinators</div>
+  <div class="tab" data-cc-tab="prefs">Preferences</div>
 </div>
 
 <div class="global-search-row" id="global-search-row">
@@ -2471,7 +2466,7 @@ We need clean margins to proceed"></textarea>
 <div class="panel hidden" id="panel-cc-newlog">
   <div class="cc-page-title">New Log Entry</div>
   <div class="cc-page-sub">Record a new action ·case will be auto-added or updated in the tracker</div>
-  <div class="cc-form-card">
+  <div class="cc-form-card" style="max-width:none; margin-bottom:22px;">
     <div class="cc-form-grid">
       <div>
         <label class="req">Case ID</label>
@@ -2511,10 +2506,10 @@ We need clean margins to proceed"></textarea>
         <textarea id="log-notes" rows="3" class="cc-input" placeholder="Optional notes..."></textarea>
       </div>
     </div>
-    <button onclick="submitLog()" class="cc-btn-primary" style="margin-top: 18px;">Save Log</button>
+    <button onclick="submitLog()" class="cc-btn-primary" style="margin-top:16px; width:100%;">Save Log</button>
   </div>
 
-  <div class="cc-section-label" style="margin-top:30px; margin-bottom:14px;">Case Tracker</div>
+  <div class="cc-section-label" style="margin-top:30px; margin-bottom:14px;">Recently Added</div>
   <div id="cc-newlog-tracker"></div>
 </div>
 
@@ -2597,6 +2592,13 @@ We need clean margins to proceed"></textarea>
       <div>
         <select id="track-stage" class="cc-input" onchange="renderTracker()"><option value="all">All Stages</option></select>
       </div>
+      <div>
+        <select id="track-sort" class="cc-input" onchange="renderTracker()">
+          <option value="updated_desc">Recently Updated</option>
+          <option value="updated_asc">Oldest Updated</option>
+          <option value="case_id_asc">Case ID (A → Z)</option>
+        </select>
+      </div>
       <div class="count" id="track-count">–</div>
     </div>
 
@@ -2608,21 +2610,25 @@ We need clean margins to proceed"></textarea>
       <h3>Design Workflow</h3>
       <div class="wf-flow">
         <div class="wf-node start">Design</div>
-        <span class="wf-arrow">→</span>
+        <span class="wf-arrow">↓</span>
         <div class="wf-node">Cases Received from Design</div>
-        <span class="wf-arrow">→</span>
+        <span class="wf-arrow">↓</span>
         <div class="wf-node">Dr Approval Sent</div>
-        <span class="wf-arrow">→</span>
+        <span class="wf-arrow">↓</span>
         <div class="wf-node hold">On Hold</div>
-        <span class="wf-arrow">→</span>
+        <span class="wf-arrow">↓</span>
         <div class="wf-node">Release from Hold</div>
-        <span class="wf-arrow">→</span>
+        <span class="wf-arrow">↓</span>
         <div class="wf-branch">
-          <div class="wf-branch-row"><div class="wf-node approve">Same Day Approved</div></div>
-          <div class="wf-branch-row"><div class="wf-node approve">Dr Approved</div></div>
-          <div class="wf-branch-row">
+          <div class="wf-branch-col">
+            <div class="wf-node approve">Same Day Approved</div>
+          </div>
+          <div class="wf-branch-col">
+            <div class="wf-node approve">Dr Approved</div>
+          </div>
+          <div class="wf-branch-col">
             <div class="wf-node change">Design Changes Requested</div>
-            <span class="wf-arrow">→</span>
+            <span class="wf-arrow">↓</span>
             <div class="wf-node">Sent Back to Design</div>
           </div>
         </div>
@@ -2633,13 +2639,13 @@ We need clean margins to proceed"></textarea>
       <h3>Case Review Workflow</h3>
       <div class="wf-flow">
         <div class="wf-node start">Case Review</div>
-        <span class="wf-arrow">→</span>
+        <span class="wf-arrow">↓</span>
         <div class="wf-node">Missing / Confirm Info</div>
-        <span class="wf-arrow">→</span>
+        <span class="wf-arrow">↓</span>
         <div class="wf-node hold">On Hold</div>
-        <span class="wf-arrow">→</span>
+        <span class="wf-arrow">↓</span>
         <div class="wf-node">Released from Hold</div>
-        <span class="wf-arrow">→</span>
+        <span class="wf-arrow">↓</span>
         <div class="wf-node start">Case Review</div>
       </div>
     </div>

@@ -2073,7 +2073,6 @@ async function reloadCcData() {
   ccData.coordinators = coords || [];
   ccData.preferences = prefs || [];
   ccLoaded = true;
-  document.getElementById('badge-prefs').textContent = ccData.preferences.length;
   populateCcFilters();
   renderDashboard();
   renderHistory();
@@ -2098,10 +2097,6 @@ function populateCcFilters() {
   const stageSel = document.getElementById('track-stage');
   stageSel.innerHTML = '<option value="all">All Stages</option>' +
     stages.map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join('');
-
-  document.getElementById('badge-history').textContent = ccData.logs.length;
-  document.getElementById('badge-tracker').textContent = ccData.cases.length;
-  document.getElementById('badge-coords').textContent  = ccData.coordinators.length;
 }
 
 function populateNewLogForm() {
@@ -2197,12 +2192,54 @@ function renderDashboard() {
 
 function setCaseTab(tab) { caseTab = tab; renderDashboard(); }
 
+// Parse a date/timestamp and return { date, time } strings in Pacific time.
+// Accepts both ISO ("2026-05-28T22:13:15.065+00:00") and the looser Postgres
+// form ("2026-05-28 22:13:15.065+00"), as well as plain date strings.
+// `time` is '' for date-only inputs.
+function formatPstParts(value, opts) {
+  if (!value) return { date: '', time: '' };
+  const includeYear = !opts || opts.year !== false;
+  let s = String(value).trim();
+  const hasTime = /[T ]\d{1,2}:/.test(s);
+  if (hasTime) {
+    s = s.replace(/([+-]\d{2})$/, '$1:00').replace(' ', 'T');
+  } else {
+    s = s + 'T12:00:00';
+  }
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return { date: '', time: '' };
+  const base = {
+    month: 'short', day: 'numeric', timeZone: 'America/Los_Angeles',
+    ...(includeYear ? { year: 'numeric' } : {}),
+  };
+  const date = d.toLocaleDateString('en-US', base);
+  const time = hasTime
+    ? d.toLocaleTimeString('en-US', {
+        hour: 'numeric', minute: '2-digit', hour12: true,
+        timeZone: 'America/Los_Angeles',
+      })
+    : '';
+  return { date, time };
+}
+
 function renderLogTable(logs) {
   if (!logs.length) return '<div class="empty">No log entries.</div>';
-  return '<table class="cc-table"><thead><tr><th>Case ID</th><th>Action</th><th>Coordinator</th><th>Date</th><th>Notes</th><th></th></tr></thead><tbody>' +
+  return '<table class="cc-table">' +
+    '<colgroup>' +
+      '<col style="width:13%">' +    // Case ID
+      '<col style="width:17%">' +    // Action (slightly smaller)
+      '<col style="width:15%">' +    // Coordinator (slightly smaller)
+      '<col style="width:22%">' +    // Date (expanded to fit time)
+      '<col style="width:28%">' +    // Notes (expanded)
+      '<col style="width:5%">' +     // Delete button
+    '</colgroup>' +
+    '<thead><tr><th>Case ID</th><th>Action</th><th>Coordinator</th><th>Date</th><th>Notes</th><th></th></tr></thead><tbody>' +
     logs.map(l => {
-      const d = l.log_date || (l.created_date || '').split('T')[0] || '';
-      const dateNice = d ? new Date(d + 'T12:00:00').toLocaleDateString('en-US', { month:'long', day:'numeric', year:'numeric' }) : '';
+      // Prefer the timestamp (has time); fall back to log_date (date only).
+      const parts = formatPstParts(l.created_date || l.log_date);
+      const dateCell = parts.time
+        ? esc(parts.date) + '<span style="display:inline-block; width:14px;"></span>' + esc(parts.time)
+        : esc(parts.date);
       const slug = (l.action_type || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
       const delBtn = l.id != null
         ? '<button class="cc-trash-btn" title="Delete log entry" onclick="deleteLogEntry(\'' + esc(String(l.id)) + '\', \'' + esc(l.case_id || '') + '\')">' + TRASH_ICON + '</button>'
@@ -2210,9 +2247,9 @@ function renderLogTable(logs) {
       return '<tr><td class="case-id-cell">' + esc(l.case_id || '') + '</td>' +
         '<td><span class="cc-action-badge ' + slug + '">' + esc(l.action_type || '') + '</span></td>' +
         '<td>' + esc(l.coordinator || '-') + '</td>' +
-        '<td class="muted">' + esc(dateNice) + '</td>' +
+        '<td class="muted">' + dateCell + '</td>' +
         '<td class="muted">' + (esc((l.notes||'').slice(0,80)) || '-') + '</td>' +
-        '<td style="text-align:right; width:40px;">' + delBtn + '</td></tr>';
+        '<td style="text-align:right;">' + delBtn + '</td></tr>';
     }).join('') +
     '</tbody></table>';
 }
@@ -2267,14 +2304,9 @@ function exportFPY() {
   toast('Downloaded FPY export', 'ok');
 }
 
-function patientInitials(name) {
-  if (!name) return '';
-  return name.trim().split(/\s+/).map(p => p[0]).join('').toUpperCase().slice(0, 3);
-}
-
 // Render a single case as a card row with inline stage/hold dropdowns + delete.
 function renderCaseCard(c, allStages) {
-  const initials = patientInitials(c.patient_name);
+  const patientLabel = (c.patient_name || '').trim();
   const wfSlug = (c.workflow_type || '').toLowerCase().replace(/[^a-z0-9]+/g, '-');
   const holdBadge = c.hold_duration
     ? '<span class="hold-badge">' + esc(c.hold_duration) + '</span>'
@@ -2282,9 +2314,9 @@ function renderCaseCard(c, allStages) {
   const wfBadge = c.workflow_type
     ? '<span class="wf-badge ' + wfSlug + '">' + esc(c.workflow_type) + '</span>'
     : '';
-  const dateNice = c.stage_updated_date
-    ? new Date(c.stage_updated_date + 'T12:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric' })
-    : '';
+  // Prefer the timestamp on Case (has time); fall back to stage_updated_date (date only).
+  const dtParts = formatPstParts(c.updated_date || c.stage_updated_date, { year: false });
+  const dateNice = dtParts.time ? dtParts.date + ' · ' + dtParts.time : dtParts.date;
   const stageOpts = allStages.map(s =>
     '<option value="' + esc(s) + '"' + (s === c.current_stage ? ' selected' : '') + '>' + esc(s) + '</option>'
   ).join('');
@@ -2297,7 +2329,7 @@ function renderCaseCard(c, allStages) {
     '<div class="info">' +
       '<div class="row1">' +
         '<span class="cnum">' + caseIdEsc + '</span>' +
-        (initials ? '<span class="sep">·</span><span class="pname">' + esc(initials) + '</span>' : '') +
+        (patientLabel ? '<span class="sep">·</span><span class="pname">' + esc(patientLabel) + '</span>' : '') +
         wfBadge + holdBadge +
       '</div>' +
       '<div class="meta">' + esc(c.coordinator || '-') + ' · ' + esc(dateNice || '-') + '</div>' +
@@ -2320,31 +2352,53 @@ function renderCaseCardList(cases) {
   return cases.map(c => renderCaseCard(c, allStages)).join('');
 }
 
+function sortCases(cases, mode) {
+  const arr = cases.slice();
+  if (mode === 'updated_asc') {
+    arr.sort((a, b) => (a.updated_date || '').localeCompare(b.updated_date || ''));
+  } else if (mode === 'case_id_asc') {
+    arr.sort((a, b) => (a.case_id || '').localeCompare(b.case_id || ''));
+  } else {
+    // default 'updated_desc': most recently updated first, nulls last
+    arr.sort((a, b) => {
+      const av = a.updated_date || '', bv = b.updated_date || '';
+      if (!av && !bv) return 0;
+      if (!av) return 1;
+      if (!bv) return -1;
+      return bv.localeCompare(av);
+    });
+  }
+  return arr;
+}
+
 function renderTracker() {
   if (!ccLoaded) return;
   const wfEl = document.getElementById('track-workflow');
   const stEl = document.getElementById('track-stage');
+  const sortEl = document.getElementById('track-sort');
   const wf = wfEl ? wfEl.value : 'all';
   const st = stEl ? stEl.value : 'all';
+  const sortMode = sortEl ? sortEl.value : 'updated_desc';
   const filtered = ccData.cases.filter(c => {
     if (wf !== 'all' && c.workflow_type !== wf) return false;
     if (st !== 'all' && c.current_stage !== st) return false;
     return true;
   });
+  const sorted = sortCases(filtered, sortMode);
   const countEl = document.getElementById('track-count');
-  if (countEl) countEl.textContent = filtered.length + ' case' + (filtered.length === 1 ? '' : 's');
+  if (countEl) countEl.textContent = sorted.length + ' case' + (sorted.length === 1 ? '' : 's');
 
   const list = document.getElementById('cc-tracker-list');
   if (list) {
-    list.innerHTML = filtered.length
-      ? renderCaseCardList(filtered.slice(0, 200))
+    list.innerHTML = sorted.length
+      ? renderCaseCardList(sorted.slice(0, 200))
       : '<div class="empty">No cases match filters.</div>';
   }
 
-  // Live tracker section under New Log form (unfiltered, most-recent first)
+  // Live tracker section under New Log form — always most-recently-updated first
   const newlog = document.getElementById('cc-newlog-tracker');
   if (newlog) {
-    newlog.innerHTML = renderCaseCardList(ccData.cases.slice(0, 50));
+    newlog.innerHTML = renderCaseCardList(sortCases(ccData.cases, 'updated_desc').slice(0, 20));
   }
 }
 
@@ -2579,16 +2633,22 @@ async function addCoordinator() {
   if (ccData.coordinators.some(c => c.name.toLowerCase() === nm.toLowerCase())) {
     toast('Coordinator already exists', 'err'); return;
   }
+  const newId = genId();
   try {
     if (inCowork) {
-      await runMcpSql("INSERT INTO \"Coordinator\" (name, created_date) VALUES ('" + nm.replace(/'/g,"''") + "', now())");
+      await runMcpSql("INSERT INTO \"Coordinator\" (id, name, created_date) VALUES ('" +
+        newId + "', '" + nm.replace(/'/g,"''") + "', now())");
     } else {
       const cfg = getConfig();
-      await fetch(cfg.url + '/rest/v1/Coordinator', {
+      const res = await fetch(cfg.url + '/rest/v1/Coordinator', {
         method: 'POST',
-        headers: { apikey: cfg.key, Authorization: 'Bearer '+cfg.key, 'Content-Type':'application/json' },
-        body: JSON.stringify([{ name: nm }]),
+        headers: {
+          apikey: cfg.key, Authorization: 'Bearer '+cfg.key,
+          'Content-Type': 'application/json', Prefer: 'return=minimal',
+        },
+        body: JSON.stringify([{ id: newId, name: nm }]),
       });
+      if (!res.ok) throw new Error(await res.text());
     }
     document.getElementById('coord-name').value = '';
     toast('Coordinator added', 'ok');
