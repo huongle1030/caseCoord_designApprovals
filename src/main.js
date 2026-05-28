@@ -1,4 +1,10 @@
 // =====================================================================
+// Auth (Microsoft SSO via Supabase) — gates the entire app boot
+// =====================================================================
+import './auth.css';
+import { initAuth, getCurrentEmployee, signOut as authSignOut } from './auth.js';
+
+// =====================================================================
 // Configuration
 // =====================================================================
 const PROJECT_ID = import.meta.env.VITE_SUPABASE_PROJECT_ID ?? '';
@@ -13,6 +19,7 @@ const REASON_LABEL = {
   design_modification: 'Design Modification',
   missing_info: 'Missing Info',
   waiting_on_parts: 'Waiting on Parts',
+  reschedule_check: 'Reschedule Check',
 };
 
 let state = { outbound: [], inbound: [], audit: [] };
@@ -3832,7 +3839,11 @@ function positionTour() {
 // =====================================================================
 // Boot
 // =====================================================================
-(function boot() {
+let _bootRan = false;
+function boot() {
+  if (_bootRan) return;
+  _bootRan = true;
+
   const sel = document.getElementById('audit-window');
   if (sel) sel.value = String(auditWindowDays);
 
@@ -3854,7 +3865,10 @@ function positionTour() {
   if (!localStorage.getItem('skdla_tour_complete')) {
     setTimeout(() => { if (!tourActive) startTour(); }, 600);
   }
-})();
+}
+
+// Kick off auth flow — boot() only runs once user is authenticated AND approved
+initAuth(() => boot());
 
 // =====================================================================
 // Metrics — by-doctor KPIs from v_dr_outreach_metrics_by_doctor.
@@ -4176,4 +4190,6 @@ Object.assign(window, {
   openMetrics, closeMetrics, loadMetrics, renderMetricsTable,
   // Call Notes modal
   openCallNotes, closeCallNotes, generateCallSummary, printCallNotes,
+  // Auth
+  authSignOut,
 });

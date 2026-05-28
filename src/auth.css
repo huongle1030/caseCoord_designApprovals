@@ -1,0 +1,183 @@
+/* Auth overlay — covers the entire app until user is signed in & approved.
+   Uses the same brand palette/fonts already defined in index.html. */
+
+.auth-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: linear-gradient(180deg, #052030 0%, #03161F 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  font-family: 'Montserrat', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.auth-card {
+  background: #FFFFFF;
+  border-radius: 14px;
+  padding: 40px 36px 32px;
+  width: min(440px, 100%);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.42);
+  text-align: center;
+}
+
+.auth-logo {
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 8px;
+  background: url('/skdla_logo.png') no-repeat center / contain;
+}
+
+.auth-brand {
+  margin-bottom: 24px;
+}
+.auth-brand-name {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  color: #052030;
+}
+.auth-brand-sub {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 2.5px;
+  color: #1882C7;
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+
+.auth-card h2 {
+  font-family: 'Lora', Georgia, serif;
+  font-size: 24px;
+  font-weight: 600;
+  color: #052030;
+  margin-bottom: 8px;
+}
+
+.auth-sub {
+  font-size: 13px;
+  color: #6B7785;
+  line-height: 1.5;
+  margin-bottom: 22px;
+}
+
+.auth-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: #6B7785;
+  margin: 18px 0 6px;
+  text-align: left;
+}
+
+.auth-select {
+  width: 100%;
+  padding: 11px 14px;
+  background: #EFF6FB;
+  border: 1px solid #D5E4ED;
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: inherit;
+  color: #1F2937;
+  margin-bottom: 8px;
+  cursor: pointer;
+}
+.auth-select:focus {
+  outline: none;
+  border-color: #1882C7;
+  background: #FFFFFF;
+}
+
+.auth-btn {
+  width: 100%;
+  padding: 12px 18px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  font-family: inherit;
+  margin-top: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  transition: background 0.15s, box-shadow 0.15s, transform 0.05s;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+.auth-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+.auth-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.auth-btn-primary {
+  background: #1882C7;
+  color: #FFFFFF;
+}
+.auth-btn-primary:hover:not(:disabled) {
+  background: #136AA3;
+  box-shadow: 0 2px 8px rgba(24, 130, 199, 0.3);
+}
+
+.auth-btn-ms {
+  background: #2F2F2F;
+  color: #FFFFFF;
+}
+.auth-btn-ms:hover:not(:disabled) {
+  background: #1F1F1F;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+/* Microsoft 4-square logo */
+.ms-logo {
+  display: inline-grid;
+  grid-template-columns: 9px 9px;
+  grid-template-rows: 9px 9px;
+  gap: 2px;
+}
+.ms-logo span:nth-child(1) { background: #F25022; }
+.ms-logo span:nth-child(2) { background: #7FBA00; }
+.ms-logo span:nth-child(3) { background: #00A4EF; }
+.ms-logo span:nth-child(4) { background: #FFB900; }
+
+.auth-link {
+  background: transparent;
+  border: none;
+  color: #6B7785;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  margin-top: 14px;
+  padding: 8px 12px;
+  font-family: inherit;
+}
+.auth-link:hover {
+  color: #052030;
+  text-decoration: underline;
+}
+
+.auth-error {
+  background: #F8E3DC;
+  border: 1px solid #E5B5A5;
+  color: #A0341A;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  margin-bottom: 14px;
+  text-align: left;
+}
+
+.auth-icon {
+  font-size: 48px;
+  margin-bottom: 8px;
+  line-height: 1;
+}

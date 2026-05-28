@@ -1,0 +1,165 @@
+// Auth flow: Microsoft SSO via Supabase Auth, gated on the `employees` table.
+// State machine: no row -> role-select; role_approval=false -> pending;
+// active=false -> rejected; role_approval=true + active=true -> approved.
+import { supabase } from './supabase.js';
+import {
+  showLoginScreen,
+  showRoleSelectionScreen,
+  showPendingScreen,
+  showRejectedScreen,
+  hideAuthOverlay,
+} from './auth-ui.js';
+
+const ALLOWED_DOMAIN = 'skdla.com';
+const APP_NAME = 'caseCoord_designApprovals';
+
+export const ROLE_OPTIONS = [
+  { value: 'design_approver',  label: 'Design Approver' },
+  { value: 'case_entry',       label: 'Case Entry' },
+  { value: 'account_manager',  label: 'Account Manager' },
+  { value: 'manager',          label: 'Manager' },
+  { value: 'operations_lead',  label: 'Operations Lead' },
+];
+
+let currentUser = null;
+let currentEmployee = null;
+let onApprovedCallback = null;
+
+export function getCurrentUser()     { return currentUser; }
+export function getCurrentEmployee() { return currentEmployee; }
+
+export async function initAuth(onApproved) {
+  onApprovedCallback = onApproved;
+
+  // Handle initial session (page load or post-OAuth redirect)
+  const { data: { session } } = await supabase.auth.getSession();
+  await routeFromSession(session);
+
+  // React to sign-in / sign-out events
+  supabase.auth.onAuthStateChange(async (_event, session) => {
+    await routeFromSession(session);
+  });
+}
+
+async function routeFromSession(session) {
+  if (!session || !session.user) {
+    currentUser = null;
+    currentEmployee = null;
+    showLoginScreen();
+    return;
+  }
+
+  const user = session.user;
+  const email = (user.email || '').toLowerCase();
+
+  // Domain guard — block non-@skdla.com accounts even if they slip past Supabase
+  if (!email.endsWith('@' + ALLOWED_DOMAIN)) {
+    await supabase.auth.signOut();
+    showLoginScreen('Only @' + ALLOWED_DOMAIN + ' accounts are allowed.');
+    return;
+  }
+
+  currentUser = user;
+  const employee = await getEmployeeRecord(user.id);
+  currentEmployee = employee;
+
+  if (!employee) {
+    showRoleSelectionScreen(user);
+    return;
+  }
+  if (employee.active === false) {
+    showRejectedScreen();
+    return;
+  }
+  if (employee.role_approval === true && employee.active !== false) {
+    await updateLoginTime(user.id);
+    hideAuthOverlay();
+    if (onApprovedCallback) onApprovedCallback(employee);
+    return;
+  }
+  // Pending: row exists but not yet approved
+  showPendingScreen();
+}
+
+export async function signInWithMicrosoft() {
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: 'azure',
+    options: {
+      scopes: 'email openid profile',
+      redirectTo: window.location.origin + window.location.pathname,
+      queryParams: {
+        prompt: 'select_account',
+      },
+    },
+  });
+  if (error) {
+    console.error('[auth] signInWithOAuth failed:', error);
+    alert('Sign-in failed: ' + error.message);
+  }
+}
+
+export async function signOut() {
+  await supabase.auth.signOut();
+  currentUser = null;
+  currentEmployee = null;
+  showLoginScreen();
+}
+
+async function getEmployeeRecord(userId) {
+  const { data, error } = await supabase
+    .from('employees')
+    .select('*')
+    .eq('id', userId)
+    .maybeSingle();
+  if (error) {
+    console.error('[auth] getEmployeeRecord failed:', error);
+    return null;
+  }
+  return data;
+}
+
+export async function createEmployeeRecord(requestedRole) {
+  if (!currentUser) throw new Error('No authenticated user');
+  const user = currentUser;
+  const displayName =
+    user.user_metadata?.full_name ||
+    user.user_metadata?.name ||
+    (user.email || '').split('@')[0];
+
+  const row = {
+    id:                   user.id,
+    name:                 displayName,
+    email:                user.email,
+    role:                 requestedRole,
+    role_approval:        false,
+    active:               true,
+    website_applications: APP_NAME + ' (' + window.location.origin + ')',
+    login_time:           new Date().toISOString(),
+  };
+
+  const { data, error } = await supabase
+    .from('employees')
+    .insert(row)
+    .select()
+    .single();
+  if (error) {
+    console.error('[auth] createEmployeeRecord failed:', error);
+    throw error;
+  }
+  currentEmployee = data;
+  return data;
+}
+
+async function updateLoginTime(userId) {
+  const { error } = await supabase
+    .from('employees')
+    .update({ login_time: new Date().toISOString() })
+    .eq('id', userId);
+  if (error) console.warn('[auth] updateLoginTime failed:', error);
+}
+
+// Manual refresh — used by the pending screen's "Check again" button
+export async function refreshEmployeeStatus() {
+  const { data: { session } } = await supabase.auth.getSession();
+  await routeFromSession(session);
+}
