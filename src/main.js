@@ -1218,8 +1218,8 @@ function renderOutbound() {
 // time so the new headlines appear without the user clicking anything.
 async function lazyBackfillPrefSummaries() {
   if (prefSummaryBackfillRunning) return;
-  const cfg = getConfig();
-  if (!cfg.anthropic) return; // No key, no backfill — fall back to raw text only.
+  // AI now routes through the /api/anthropic proxy (server holds the key), so
+  // there's no client-side key to gate on; callAnthropic handles auth/errors.
   const targets = [];
   const seen = new Set();
   for (const r of (state.outbound || [])) {
@@ -2060,7 +2060,7 @@ function closeSettings() {
 let currentMode = localStorage.getItem('skdla_mode') || 'outreach';
 
 const OUTREACH_PANELS = ['outbound','ready','inbound','audit','lookup','submit','reschedule','editlog','feedback'];
-const CC_PANELS       = ['cc-dashboard','cc-newlog','cc-history','cc-tracker','cc-coordinators']; // 'cc-prefs' temporarily disabled
+const CC_PANELS       = ['cc-dashboard','cc-newlog','cc-history','cc-tracker','cc-coordinators','cc-prefs'];
 
 function switchMode(mode) {
   currentMode = mode;
@@ -2578,14 +2578,12 @@ async function reloadCcData() {
     cases  = await runMcpSql('SELECT * FROM "Case"        ORDER BY updated_date DESC NULLS LAST LIMIT 500');
     logs   = await runMcpSql('SELECT * FROM "CaseLog"     ORDER BY log_date DESC NULLS LAST, created_date DESC NULLS LAST LIMIT 5000');
     coords = await runMcpSql('SELECT * FROM "Coordinator" ORDER BY name LIMIT 200');
-    // Preferences tab temporarily disabled
-    // prefs  = await runMcpSql('SELECT * FROM v_account_preferences ORDER BY practice_name LIMIT 2000');
+    prefs  = await runMcpSql('SELECT * FROM v_account_preferences ORDER BY practice_name LIMIT 2000');
   } else {
     cases  = await restGet('/rest/v1/Case?select=*&order=updated_date.desc.nullslast&limit=500');
     logs   = await restGet('/rest/v1/CaseLog?select=*&order=log_date.desc.nullslast,created_date.desc.nullslast&limit=5000');
     coords = await restGet('/rest/v1/Coordinator?select=*&order=name&limit=200');
-    // Preferences tab temporarily disabled
-    // prefs  = await restGet('/rest/v1/v_account_preferences?select=*&order=practice_name&limit=2000');
+    prefs  = await restGet('/rest/v1/v_account_preferences?select=*&order=practice_name&limit=2000');
   }
   ccData.cases = cases || [];
   ccData.logs  = logs  || [];
@@ -2597,7 +2595,7 @@ async function reloadCcData() {
   renderHistory();
   renderTracker();
   renderCoordinators();
-  // renderPrefsList(); // Preferences tab temporarily disabled
+  renderPrefsList();
   populateNewLogForm();
 }
 
@@ -3319,7 +3317,6 @@ Rules:
 
 async function extractPrefsWithAI(acctNum) {
   const cfg = getConfig();
-  if (!cfg.anthropic) { toast('Auto-extract is not configured. Open Config to add credentials.', 'err'); openConfig(); return; }
   const p = (ccData.preferences || []).find(x => x.account_number === acctNum);
   if (!p) return;
   const raw = (p.raw_case_entry_pref || '') + (p.raw_dr_pref ? '\n\n--- Dr Pref ---\n' + p.raw_dr_pref : '');
@@ -3426,11 +3423,6 @@ async function fetchPrefRow(acctNum) {
 async function generatePrefSummaries(acctNum, opts) {
   opts = opts || {};
   const cfg = getConfig();
-  if (!cfg.anthropic) {
-    if (opts.silent) return;
-    toast('Summary generator is not configured. Open Config to add credentials.', 'err');
-    return;
-  }
   // Prefer cached prefs (from CC mode); otherwise fetch the row directly so
   // the lazy backfill works even if the user has never opened the CC tab.
   let p = (ccData.preferences || []).find(x => x.account_number === acctNum);
@@ -3478,8 +3470,6 @@ async function generatePrefSummaries(acctNum, opts) {
 }
 
 async function bulkExtractPrefs() {
-  const cfg = getConfig();
-  if (!cfg.anthropic) { toast('Auto-extract is not configured. Open Config to add credentials.', 'err'); openConfig(); return; }
   // Only auto-backfilled rows that haven't been processed yet AND have raw text
   const targets = (ccData.preferences || []).filter(p =>
     p.derived_from_accounts && !p.ai_extracted_at &&
@@ -3650,7 +3640,6 @@ const TOUR_STEPS = [
   { title: "Manage names", body: "Add or remove the names that appear in dropdowns across the app.",
     selector: '#panel-cc-coordinators', placement: 'top' },
 
-  /* Preferences tab temporarily disabled
   { title: "Click Preferences", body: "Open the last tab. This one matters.",
     selector: '#tabs-cc .tab[data-cc-tab="prefs"]', placement: 'bottom', requireClick: true },
   { title: "Auto-backfilled", body: "Doctor preferences pulled from your existing account data. Yellow badge means not reviewed yet.",
@@ -3661,7 +3650,6 @@ const TOUR_STEPS = [
     selector: '#panel-cc-prefs', placement: 'top' },
   { title: "Preferences feed the emails", body: "Once saved here, they surface on every outbound email automatically.",
     selector: '#panel-cc-prefs', placement: 'top' },
-  */
 
   // Closing
   { title: "That's the tour", body: "You are set.", placement: 'center' },
