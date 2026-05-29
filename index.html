@@ -2172,6 +2172,16 @@
     border-color: var(--blue);
     box-shadow: 0 0 0 3px rgba(24, 130, 199, 0.1);
   }
+  /* Auto-filled, non-editable fields (Date/Time, Coordinator) */
+  .cn-field input.cn-locked {
+    background: #f6f8fa;
+    color: var(--slate);
+    cursor: default;
+  }
+  .cn-field input.cn-locked:focus {
+    border-color: var(--slate-light);
+    box-shadow: none;
+  }
   .cn-hint {
     font-size: 10px; color: var(--slate); font-weight: 400;
     text-transform: none; letter-spacing: 0;
@@ -3706,7 +3716,7 @@ Clean margins are needed before we can proceed with the design"></textarea>
         </div>
         <div class="cn-field">
           <label>Date / Time</label>
-          <input type="text" id="cn-when" />
+          <input type="text" id="cn-when" class="cn-locked" readonly tabindex="-1" />
         </div>
       </div>
       <div class="cn-row">
@@ -3716,7 +3726,7 @@ Clean margins are needed before we can proceed with the design"></textarea>
         </div>
         <div class="cn-field">
           <label>Coordinator</label>
-          <input type="text" id="cn-who" placeholder="Your name" />
+          <input type="text" id="cn-who" class="cn-locked" readonly tabindex="-1" />
         </div>
       </div>
       <div class="cn-field cn-full">
