@@ -2454,7 +2454,7 @@ async function lookupCase() {
       <div><div class="label">Case</div><div class="value">${esc(cn)}</div></div>
       <div><div class="label">Outbound</div><div class="value">${counts.outbound || 0}</div></div>
       <div><div class="label">Inbound</div><div class="value">${counts.inbound || 0}</div></div>
-      <div><div class="label">First / Last</div><div class="value" style="font-size:11px;">${firstSeen ? firstSeen.toLocaleDateString() : '–'} → ${lastSeen ? lastSeen.toLocaleDateString() : '–'}</div></div>
+      <div><div class="label">First / Last</div><div class="value" style="font-size:11px;">${firstSeen ? firstSeen.toLocaleDateString([], {timeZone:'America/Los_Angeles'}) : '–'} → ${lastSeen ? lastSeen.toLocaleDateString([], {timeZone:'America/Los_Angeles'}) : '–'}</div></div>
       <div class="lookup-actions">
         <button class="act blue" onclick="generateCaseSummary()" id="case-summary-btn">Generate AI Summary</button>
         <button class="act approve" onclick="printCaseLookup()">Print PDF</button>
@@ -2468,7 +2468,7 @@ async function lookupCase() {
 
   const events = rows.map(r => {
     const t = r.event_time ? new Date(r.event_time) : null;
-    const timeStr = t ? t.toLocaleDateString() + ' ' + t.toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}) : '';
+    const timeStr = t ? t.toLocaleDateString([], {timeZone:'America/Los_Angeles'}) + ' ' + t.toLocaleTimeString([], {timeZone:'America/Los_Angeles',hour:'numeric',minute:'2-digit'}) + ' PT' : '';
     const typeLabel = (r.event_type || '').replace(/_/g, ' ');
     const statusClass = (r.status || '').replace(/\s+/g, '_').toLowerCase();
     const statusChip = r.status
@@ -2504,7 +2504,7 @@ function _caseTimelineToText(rows) {
   const ordered = (rows || []).slice().sort((a, b) =>
     new Date(a.event_time || 0) - new Date(b.event_time || 0));
   return ordered.map(r => {
-    const t = r.event_time ? new Date(r.event_time).toLocaleString() : '';
+    const t = r.event_time ? new Date(r.event_time).toLocaleString([], {timeZone:'America/Los_Angeles'}) + ' PT' : '';
     const who = r.counterparty || r.actor || '';
     const dir = r.direction === 'outbound' ? 'WE SENT' : r.direction === 'inbound' ? 'THEY SAID' : 'INTERNAL';
     const subj = r.subject ? ' — ' + r.subject : '';
@@ -2572,7 +2572,7 @@ function printCaseLookup() {
 
   const eventsHtml = ordered.map(r => {
     const t   = r.event_time ? new Date(r.event_time) : null;
-    const stamp = t ? t.toLocaleDateString() + ' ' + t.toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}) : '';
+    const stamp = t ? t.toLocaleDateString([], {timeZone:'America/Los_Angeles'}) + ' ' + t.toLocaleTimeString([], {timeZone:'America/Los_Angeles',hour:'numeric',minute:'2-digit'}) + ' PT' : '';
     const dirLabel = r.direction === 'outbound' ? 'Outbound' :
                      r.direction === 'inbound'  ? 'Inbound'  : 'Internal';
     const who = r.counterparty || r.actor || '';
