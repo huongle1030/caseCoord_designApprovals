@@ -246,6 +246,42 @@
   .tab.active { color: var(--navy); border-bottom-color: var(--blue); }
   .tab.active .badge { background: var(--blue); color: var(--white); }
 
+  /* Pending sub-nav — a lighter secondary row beneath the main tabs */
+  .subtabs {
+    display: flex; padding: 0 0 0 24px;
+    background: var(--pale, #eef3fb);
+    border-bottom: 1px solid var(--slate-light);
+    font-family: 'Montserrat', sans-serif;
+  }
+  .tab.subtab {
+    flex: 0 1 auto;
+    min-height: 40px; padding: 9px 18px;
+    font-size: 13px; letter-spacing: 1px;
+    font-weight: 500;             /* subtabs are not bold */
+  }
+  /* Count sits inline beside the label (not absolutely positioned over it) so
+     it never covers the last letters of the subtab name. */
+  .tab.subtab .badge {
+    position: static; top: auto; right: auto;
+    margin-left: 7px;
+    background: var(--slate-light); color: var(--charcoal);
+  }
+  .tab.subtab.active {
+    color: var(--charcoal); background: var(--white);
+    border-bottom-color: var(--charcoal);
+  }
+  .tab.subtab.active .badge { background: var(--charcoal); color: var(--white); }
+  .tab.tab-parent.active { color: var(--navy); border-bottom-color: var(--blue); }
+
+  /* Triage chips on draft cards (Pending Approval) */
+  .triage-chip {
+    display: inline-block; padding: 3px 9px; border-radius: 10px;
+    font-size: 10px; font-weight: 800; letter-spacing: 1.2px;
+    text-transform: uppercase; margin-left: 6px;
+  }
+  .triage-chip.unsure    { background: #FEF3C7; color: var(--gold, #92600a); }
+  .triage-chip.confirmed { background: #DCFCE7; color: #15803D; }
+
   /* KPI strip (above tabs) — kept tight so case cards come into view sooner */
   .kpi-strip {
     padding: 0 14px 0;
@@ -1268,7 +1304,7 @@
   .partner-chip.other       { background: #B0B7C3; color: var(--charcoal); }
 
   .audit-row {
-    display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr;
+    display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr;
     gap: 0; padding: 10px 14px;
     background: var(--white); border: 1px solid var(--slate-light);
     border-radius: 4px; margin-bottom: 6px; align-items: center;
@@ -1600,34 +1636,37 @@
     margin-top: 2px;
   }
 
-  /* Reschedule table */
+  /* Reschedule table — matches the Ready for ABS Scan table format */
   .resched-table {
-    width: 100%; border-collapse: collapse;
-    background: var(--white); border: 1px solid var(--slate-light);
-    border-radius: 6px; overflow: hidden;
+    width: 100%; border-collapse: separate; border-spacing: 0;
+    background: var(--white);
+    border: 1px solid var(--slate-light); border-radius: 8px;
+    overflow: hidden;
+    font-size: 13px;
   }
-  .resched-table thead { background: var(--navy); color: var(--white); }
   .resched-table thead th {
+    background: var(--navy); color: var(--white);
     text-align: left; padding: 12px 14px;
-    font-size: 11px; font-weight: 800;
-    letter-spacing: 1.5px; text-transform: uppercase;
+    font-family: 'Montserrat', sans-serif;
+    font-size: 11px; font-weight: 600; letter-spacing: 1.5px;
+    text-transform: uppercase;
   }
-  .resched-table tbody tr { border-top: 1px solid var(--slate-light); }
-  .resched-table tbody tr:nth-child(odd) { background: #FBFCFD; }
   .resched-table tbody td {
-    padding: 10px 14px; font-size: 13px;
+    padding: 12px 14px;
+    border-top: 1px solid var(--slate-light);
     vertical-align: middle;
   }
+  .resched-table tbody tr:hover td { background: var(--pale); }
   .resched-table .pan-cell {
-    font-family: Consolas, monospace; font-weight: 800;
-    color: var(--navy); font-size: 14px;
+    font-family: Consolas, monospace; font-weight: 700;
+    color: var(--navy);
   }
   .resched-table .case-cell {
     font-family: Consolas, monospace; color: var(--slate);
-    font-size: 11px;
+    font-size: 12px;
   }
   .resched-table .days-cell {
-    font-weight: 800; font-size: 14px;
+    font-weight: 700;
   }
   .resched-table .days-cell.severe { color: var(--red); }
   .resched-table .days-cell.warning { color: var(--gold); }
@@ -1916,7 +1955,6 @@
     vertical-align: middle;
   }
   .ready-table tbody tr:hover td { background: var(--pale); }
-  .ready-table tbody tr.not-queued td { background: rgba(179, 163, 105, 0.06); }
   .ready-table .pan {
     font-family: Consolas, monospace; font-weight: 700; color: var(--navy);
   }
@@ -3105,14 +3143,23 @@
 
 <div class="tabs" id="tabs-outreach">
   <div class="tab" data-tab="submit">Submit Request</div>
-  <div class="tab active" data-tab="outbound">Pending Outbound <span class="badge" id="badge-out">–</span></div>
-  <div class="tab" data-tab="inbound">Pending Replies <span class="badge" id="badge-in">–</span></div>
-  <div class="tab" data-tab="ready">Ready for Approval <span class="badge" id="badge-ready">–</span></div>
-  <div class="tab" data-tab="reschedule">Reschedule <span class="badge" id="badge-resched">–</span></div>
+  <div class="tab tab-parent active" data-group="pending">Pending <span class="badge" id="badge-pending">–</span></div>
+  <div class="tab tab-parent" data-group="actions">Actions <span class="badge" id="badge-actions">–</span></div>
   <div class="tab" data-tab="lookup">Case Lookup</div>
   <div class="tab" data-tab="audit">Audit</div>
   <div class="tab" data-tab="editlog">Edit Log <span class="badge" id="badge-editlog">–</span></div>
   <div class="tab" data-tab="feedback">Feedback</div>
+</div>
+
+<div class="subtabs" id="subtabs-pending">
+  <div class="tab subtab active" data-tab="outbound">Pending Outbound <span class="badge" id="badge-out">–</span></div>
+  <div class="tab subtab" data-tab="approval">Pending Approval <span class="badge" id="badge-approval">–</span></div>
+  <div class="tab subtab" data-tab="inbound">Pending Replies <span class="badge" id="badge-in">–</span></div>
+</div>
+
+<div class="subtabs hidden" id="subtabs-actions">
+  <div class="tab subtab" data-tab="ready">Ready for ABS Scan <span class="badge" id="badge-ready">–</span></div>
+  <div class="tab subtab" data-tab="reschedule">Reschedule <span class="badge" id="badge-resched">–</span></div>
 </div>
 
 <div class="tabs hidden" id="tabs-cc">
@@ -3174,9 +3221,15 @@
   <div id="list-outbound"><div class="loading">Loading…</div></div>
 </div>
 
+<div class="panel hidden" id="panel-approval">
+  <h2>Pending Approval <span style="color: var(--slate); font-weight: 400; font-size: 14px; font-family: 'Montserrat', sans-serif;">·  we've already reached the doctor since this draft — awaiting their approval</span></h2>
+  <div class="outbound-count" id="approval-count"></div>
+  <div id="list-approval"><div class="loading">Loading…</div></div>
+</div>
+
 <div class="panel hidden" id="panel-ready">
-  <h2>Ready for Approval <span style="color: var(--slate); font-weight: 400; font-size: 14px; font-family: 'Montserrat', sans-serif;">·  AoX cases currently in Doctor Design Approval</span></h2>
-  <p style="color: var(--slate); font-size: 13px; margin-bottom: 14px;">Every Full Arch case where ABS has scanned in the "Doctor Design Approval - Full Arch" step but not yet scanned it off. Cases not yet in our automated queue are shown in <strong style="color: var(--gold);">gold</strong>.</p>
+  <h2>Ready for ABS Scan <span style="color: var(--slate); font-weight: 400; font-size: 14px; font-family: 'Montserrat', sans-serif;"></span></h2>
+  <!-- <p style="color: var(--slate); font-size: 13px; margin-bottom: 14px;">Every Full Arch case where ABS has scanned in the "Doctor Design Approval - Full Arch" step but not yet scanned it off. Cases not yet in our automated queue are shown in <strong style="color: var(--gold);">gold</strong>.</p> -->
   <div id="list-ready"><div class="loading">Loading…</div></div>
 </div>
 
@@ -3239,19 +3292,16 @@
       </select>
     </div>
   </div>
-  <p style="color: var(--slate); font-size: 12px; margin-bottom: 10px;">Daily totals of how coordinators have been handling pending items. Use this to spot patterns (high edit rate = template needs work; high reject rate = trigger logic is off).</p>
+  <p style="color: var(--slate); font-size: 12px; margin-bottom: 10px;">Daily totals of how coordinators have been handling pending items. Approved / Edited / Rejected count coordinator review actions (high edit rate = template needs work). <strong>Auto-canceled</strong> are drafts the system stood down on its own because the case already advanced past doctor design approval — or shipped — in ABS; these are not coordinator rejections.</p>
   <div id="list-audit"><div class="loading">Loading…</div></div>
 </div>
 
 <div class="panel hidden" id="panel-reschedule">
   <div class="resched-toolbar">
-    <h2 style="margin: 0;">Reschedule List <span style="color: var(--slate); font-weight: 400; font-size: 14px; font-family: 'Montserrat', sans-serif;">·  cases that won't make their due date</span></h2>
+    <h2 style="margin: 0;">Reschedule List <span style="color: var(--slate); font-weight: 400; font-size: 14px; font-family: 'Montserrat', sans-serif;"></span></h2>
     <button class="export-btn" onclick="exportReschedule()">Export CSV</button>
   </div>
-  <p style="color: var(--slate); font-size: 11px; margin: 0 0 6px;">
-    Uses a 5 business-day manufacturing window from approval. Cutoff is 9am PST today: approved before that → today counts as Day 1, after → Day 1 is tomorrow. The earliest ship date here assumes approval lands right now.
-  </p>
-  <div class="resched-summary" id="resched-summary">Loading…</div>
+
   <div style="display:flex; align-items:center; gap:10px; margin: 8px 0 6px;">
     <label class="toolbar-label">Bucket</label>
     <div class="custom-dd" id="resched-filter-dd">

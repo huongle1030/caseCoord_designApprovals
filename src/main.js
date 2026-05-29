@@ -437,6 +437,7 @@ async function loadReady() {
     readyRows = await restGet('/rest/v1/v_aox_design_approval_due?select=*&order=waiting_since.desc&limit=1000') || [];
   }
   document.getElementById('badge-ready').textContent = readyRows.length;
+  updateActionsBadge();
   renderReady();
 }
 
@@ -447,7 +448,7 @@ function renderReady() {
     return;
   }
   // Quick set of case_numbers already in the open queue (with drafts)
-  const inQueue = new Set((state.outbound || []).map(r => r.case_number));
+  const inQueue = new Set((state.outboundAll || state.outbound || []).map(r => r.case_number));
   // Group by practice for at-a-glance reading
   const sorted = readyRows.slice().sort((a, b) => {
     const da = new Date(a.waiting_since).getTime();
@@ -504,6 +505,7 @@ async function loadReschedule() {
   }
   reschedRows = rows;
   document.getElementById('badge-resched').textContent = reschedRows.length;
+  updateActionsBadge();
   renderReschedule();
 }
 
@@ -530,10 +532,8 @@ function setReschedFilter(bucket) {
 }
 
 function renderReschedule() {
-  const summary = document.getElementById('resched-summary');
   const list = document.getElementById('resched-list');
   if (!reschedRows.length) {
-    summary.innerHTML = '<strong style="color:var(--green);font-size:18px;">0</strong> cases need rescheduling. Every open case can still meet its due date if approved today.';
     list.innerHTML = '';
     return;
   }
@@ -567,10 +567,6 @@ function renderReschedule() {
 
   const filteredRows = current ? reschedRows.filter(r => r.bucket === current) : reschedRows;
 
-  summary.innerHTML = '<strong>' + reschedRows.length + '</strong> cases ' +
-    'need rescheduling. <span style="color:var(--slate);">Pre-approval: ' + counts.pre_approval +
-    ' · Late approval: ' + counts.late_approval + '</span>';
-
   if (!filteredRows.length) {
     list.innerHTML = '<div class="empty"><strong>No cases match this filter.</strong></div>';
     return;
@@ -601,7 +597,7 @@ function renderReschedule() {
         </td>
         <td>${bucketChip}</td>
         <td>
-          <div>${esc(r.dr_last_name || '-')}</div>
+          <div>${esc(r.dr_email || '-')}</div>
           <div style="font-size:11px;color:var(--slate);">${esc(r.practice_name || '')}</div>
         </td>
         <td>${esc(r.patient_name || '-')}</td>
@@ -664,18 +660,44 @@ function exportReschedule() {
 }
 
 async function loadOutbound() {
-  // Bypass the default 100-row queryView cap. The view already has its own
-  // ORDER BY att.created_at, so we just need the full result set.
+  // Reads the triage view (v_pending_outbound + a triage_bucket derived from
+  // case_communications) and splits it across the two Pending sub-tabs:
+  //   outbound_only           -> Pending Outbound (we still need to send)
+  //   pending_approval_unsure -> Pending Approval, flagged "not sure" (note-only evidence)
+  //   pending_approval        -> Pending Approval, confirmed via a shared mailbox
   let rows;
   if (inCowork) {
-    rows = await runMcpSql('SELECT * FROM v_pending_outbound LIMIT 2000') || [];
+    rows = await runMcpSql('SELECT * FROM v_pending_outbound_triage LIMIT 2000') || [];
   } else {
-    rows = await restGet('/rest/v1/v_pending_outbound?select=*&limit=2000') || [];
+    rows = await restGet('/rest/v1/v_pending_outbound_triage?select=*&limit=2000') || [];
   }
-  state.outbound = rows;
-  document.getElementById('badge-out').textContent = rows.length;
-  document.getElementById('stat-out').textContent = rows.length;
+  state.outboundAll = rows;
+  state.outbound = rows.filter(r => r.triage_bucket === 'outbound_only');
+  state.approval  = rows.filter(r => r.triage_bucket === 'pending_approval'
+                                  || r.triage_bucket === 'pending_approval_unsure');
+  document.getElementById('badge-out').textContent = state.outbound.length;
+  document.getElementById('stat-out').textContent = state.outbound.length;
+  const ba = document.getElementById('badge-approval');
+  if (ba) ba.textContent = state.approval.length;
+  updatePendingBadge();
   renderOutbound();
+  renderApproval();
+}
+
+// Roll-up count on the "Pending" parent tab = outbound + approval + replies.
+function updatePendingBadge() {
+  const el = document.getElementById('badge-pending');
+  if (!el) return;
+  el.textContent = (state.outbound?.length || 0)
+                 + (state.approval?.length || 0)
+                 + (state.inbound?.length || 0);
+}
+
+// Roll-up count on the "Actions" parent tab = ready (ABS scan) + reschedule.
+function updateActionsBadge() {
+  const el = document.getElementById('badge-actions');
+  if (!el) return;
+  el.textContent = (readyRows?.length || 0) + (reschedRows?.length || 0);
 }
 
 async function loadInbound() {
@@ -690,6 +712,7 @@ async function loadInbound() {
   state.inbound = rows;
   document.getElementById('badge-in').textContent = rows.length;
   document.getElementById('stat-in').textContent = rows.length;
+  updatePendingBadge();
   renderInbound();
 }
 
@@ -702,7 +725,7 @@ async function loadAudit() {
   let rows;
   if (inCowork) {
     rows = await runMcpSql(
-      "SELECT TO_CHAR(day, 'YYYY-MM-DD') AS day, approved, edited, rejected, total_reviewed " +
+      "SELECT TO_CHAR(day, 'YYYY-MM-DD') AS day, approved, edited, rejected, auto_canceled, total_reviewed " +
       "FROM v_review_audit WHERE day >= '" + cutoffISO + "' ORDER BY day DESC"
     );
   } else {
@@ -923,10 +946,12 @@ function onGlobalSearch(value) {
   const wrap = document.getElementById('global-search-wrap');
   if (wrap) wrap.classList.toggle('has-text', !!globalSearch.value);
   // Apply to whichever tab is open
-  const activeTab = document.querySelector('#tabs-outreach .tab.active')?.dataset.tab;
+  const activeTab = currentOutreachTab();
   if (activeTab === 'outbound') {
     outboundFilter.search = globalSearch.value;
     renderOutbound();
+  } else if (activeTab === 'approval') {
+    renderApproval();
   } else if (activeTab === 'inbound') {
     // Mirror into the dedicated inbound search box if it exists
     const inboundBox = document.getElementById('inbound-search');
@@ -950,11 +975,12 @@ function updateGlobalSearchScope() {
   const input = document.getElementById('global-search');
   const searchRow = document.getElementById('global-search-row');
   if (!hint || !input || !searchRow) return;
-  const activeTab = document.querySelector('#tabs-outreach .tab.active')?.dataset.tab;
+  const activeTab = currentOutreachTab();
   const labelMap = {
     outbound: 'Pending Outbound',
+    approval: 'Pending Approval',
     inbound: 'Pending Replies',
-    ready: 'Ready for Approval',
+    ready: 'Ready for ABS Scan',
     reschedule: 'Reschedule',
   };
   // Tabs without a meaningful global search: hide just the search bar
@@ -1120,7 +1146,14 @@ function renderOutbound() {
     root.innerHTML = '<div class="empty"><strong>No drafts match this filter.</strong><br/>Click All to clear.</div>';
     return;
   }
-  root.innerHTML = filtered.map(r => {
+  root.innerHTML = filtered.map(renderOutboundCard).join('');
+  lazyBackfillPrefSummaries();
+}
+
+// Renders one draft card. Shared by Pending Outbound and Pending Approval — the
+// triage chip + Approve/Edit/Reject actions are identical; only which list each
+// card lands in differs (by triage_bucket).
+function renderOutboundCard(r) {
     const reasonChip = '<span class="reason-chip ' + r.reason + '">' + (REASON_LABEL[r.reason] || r.reason) + '</span>';
     // Revenue chip: high $5k+, mid $2k-$5k, neutral under $2k. Hide if $0.
     const rev = Number(r.case_revenue || 0);
@@ -1154,6 +1187,15 @@ function renderOutbound() {
     const noLinkChip = hasExocadLink
       ? ''
       : '<span class="activity-chip nolink">⚠ No exocad link yet</span>';
+    // Triage chip — shown on Pending Approval cards. "not sure" = contact since the
+    // draft seen only in Case Notes (no shared-mailbox proof); "reached doctor" =
+    // confirmed via implants@/clearchoice@ (shared mailbox / CC'd / system send / reply).
+    let triageChip = '';
+    if (r.triage_bucket === 'pending_approval_unsure') {
+      triageChip = '<span class="triage-chip unsure" title="Contact logged in Case Notes since this draft, but not confirmed via a shared mailbox">⚠ not sure</span>';
+    } else if (r.triage_bucket === 'pending_approval') {
+      triageChip = '<span class="triage-chip confirmed" title="Confirmed contact since this draft via implants@/clearchoice@ (shared mailbox)">✓ reached doctor</span>';
+    }
     return `
     <div class="item reason-${r.reason}" data-id="${r.attempt_id}">
       <div class="item-head" onclick="toggleItem('${r.attempt_id}')">
@@ -1164,6 +1206,7 @@ function renderOutbound() {
           </span>
           ${revenueChip}
           ${partnerChip}
+          ${triageChip}
           ${activityChip}
           ${missChip}
           ${noLinkChip}
@@ -1240,10 +1283,38 @@ function renderOutbound() {
         </div>
       </div>
     </div>`;
-  }).join('');
+}
 
-  // Kick off the lazy summary backfill in the background. Safe to call on
-  // every render; it dedupes per-account-per-session internally.
+// Pending Approval sub-tab: drafts where we've already reached the doctor since
+// the draft was proposed (triage_bucket pending_approval / _unsure). Reuses the
+// outbound card (so Approve/Edit/Reject still work) and shows the triage chip.
+function renderApproval() {
+  const root = document.getElementById('list-approval');
+  if (!root) return;
+  const countEl = document.getElementById('approval-count');
+  const all = state.approval || [];
+  if (!all.length) {
+    root.innerHTML = '<div class="empty"><strong>Nothing awaiting doctor approval.</strong><br/>Drafts where we’ve already reached the doctor since the draft was proposed will appear here.</div>';
+    if (countEl) countEl.textContent = '';
+    return;
+  }
+  const q = (globalSearch.value || '').trim().toLowerCase();
+  let rows = q
+    ? all.filter(r => [r.case_number, r.pan_number, r.dr_last_name, r.practice_name, r.to_email, r.subject]
+        .some(v => String(v || '').toLowerCase().includes(q)))
+    : all.slice();
+  // "Not sure" first (need a human look), then confirmed; newest evidence first.
+  rows.sort((a, b) => {
+    const rank = x => x.triage_bucket === 'pending_approval_unsure' ? 0 : 1;
+    if (rank(a) !== rank(b)) return rank(a) - rank(b);
+    return new Date(b.evidence_at || 0) - new Date(a.evidence_at || 0);
+  });
+  if (countEl) {
+    const unsure = all.filter(r => r.triage_bucket === 'pending_approval_unsure').length;
+    countEl.textContent = (q ? `Showing ${rows.length} of ${all.length}` : `${all.length} total`)
+                        + ` · ${unsure} not sure`;
+  }
+  root.innerHTML = rows.map(renderOutboundCard).join('');
   lazyBackfillPrefSummaries();
 }
 
@@ -1258,7 +1329,7 @@ async function lazyBackfillPrefSummaries() {
   // there's no client-side key to gate on; callAnthropic handles auth/errors.
   const targets = [];
   const seen = new Set();
-  for (const r of (state.outbound || [])) {
+  for (const r of (state.outboundAll || state.outbound || [])) {
     if (!r.account_number) continue;
     if (!r.account_preferences) continue;
     if (r.prefs_summary_headline) continue;
@@ -1737,6 +1808,7 @@ function renderAudit() {
       <div class="col-label" style="color:rgba(255,255,255,.85);">Approved</div>
       <div class="col-label" style="color:rgba(255,255,255,.85);">Edited</div>
       <div class="col-label" style="color:rgba(255,255,255,.85);">Rejected</div>
+      <div class="col-label" style="color:rgba(255,255,255,.85);">Auto-canceled</div>
       <div class="col-label" style="color:rgba(255,255,255,.85);">Total</div>
     </div>`;
   const rows = state.audit.map(r => {
@@ -1747,6 +1819,7 @@ function renderAudit() {
         <div class="col-val" style="color:var(--green);">${r.approved || 0}</div>
         <div class="col-val" style="color:var(--gold);">${r.edited || 0}</div>
         <div class="col-val" style="color:var(--red);">${r.rejected || 0}</div>
+        <div class="col-val" style="color:var(--slate);">${r.auto_canceled || 0}</div>
         <div class="col-val">${r.total_reviewed || 0}</div>
       </div>`;
   }).join('');
@@ -2165,7 +2238,7 @@ function closeSettings() {
 // =====================================================================
 let currentMode = localStorage.getItem('skdla_mode') || 'outreach';
 
-const OUTREACH_PANELS = ['outbound','ready','inbound','audit','lookup','submit','reschedule','editlog','feedback'];
+const OUTREACH_PANELS = ['outbound','approval','ready','inbound','audit','lookup','submit','reschedule','editlog','feedback'];
 const CC_PANELS       = ['cc-dashboard','cc-newlog','cc-history','cc-tracker','cc-coordinators','cc-prefs'];
 
 function switchMode(mode) {
@@ -2174,6 +2247,12 @@ function switchMode(mode) {
 
   document.getElementById('tabs-outreach').classList.toggle('hidden', mode !== 'outreach');
   document.getElementById('tabs-cc').classList.toggle('hidden', mode !== 'cc');
+  // The sub-nav rows belong to the outreach app; hide them outside outreach mode
+  // (activateOutreachTab refines visibility within outreach based on the active tab).
+  if (mode !== 'outreach') {
+    document.getElementById('subtabs-pending')?.classList.add('hidden');
+    document.getElementById('subtabs-actions')?.classList.add('hidden');
+  }
 
   // Hide all panels then show the default for the current mode
   [...OUTREACH_PANELS, ...CC_PANELS].forEach(p =>
@@ -2182,12 +2261,9 @@ function switchMode(mode) {
   document.querySelectorAll('#tabs-outreach .tab, #tabs-cc .tab').forEach(t => t.classList.remove('active'));
 
   if (mode === 'outreach') {
-    // Default to the markup's "outbound" tab, but fall back to the first tab
-    // this role is actually allowed to see (e.g. case_entry lands on Submit).
-    const first = firstPermittedOutreachTab();
-    document.getElementById('panel-' + first).classList.remove('hidden');
-    document.querySelector(`#tabs-outreach .tab[data-tab="${first}"]`)?.classList.add('active');
-    runTabSideEffects(first);
+    // Land on the first tab this role can see; activateOutreachTab handles the
+    // Pending parent + sub-nav. (e.g. case_entry lands on Submit.)
+    activateOutreachTab(firstPermittedOutreachTab());
     document.querySelector('.brand-text .sub').textContent = 'Spectrum Killian · Coordinator Inbox';
     document.getElementById('check-outreach').style.display = 'inline';
     document.getElementById('check-cc').style.display = 'none';
@@ -2219,6 +2295,7 @@ function switchMode(mode) {
 const TAB_CAP = {
   submit:     CAPABILITIES.TAB_SUBMIT,
   outbound:   CAPABILITIES.TAB_OUTBOUND,
+  approval:   CAPABILITIES.TAB_OUTBOUND,  // same drafts as Outbound, triaged -> same capability
   inbound:    CAPABILITIES.TAB_INBOUND,
   ready:      CAPABILITIES.TAB_READY,
   reschedule: CAPABILITIES.TAB_RESCHEDULE,
@@ -2226,6 +2303,18 @@ const TAB_CAP = {
   audit:      CAPABILITIES.TAB_AUDIT,
   editlog:    CAPABILITIES.TAB_EDITLOG,
 };
+
+// Sub-tabs nested under the "Pending" parent tab (sub-nav order).
+// Parent tabs that carry no panel of their own — clicking one opens its first
+// permitted sub-tab, shown in a secondary sub-nav row beneath the main tabs.
+const TAB_GROUPS = {
+  pending: { children: ['outbound','approval','inbound'], subnav: 'subtabs-pending' },
+  actions: { children: ['ready','reschedule'],            subnav: 'subtabs-actions' },
+};
+// The group key (e.g. 'pending') that owns a sub-tab, or null for top-level tabs.
+function groupKeyForChild(which) {
+  return Object.keys(TAB_GROUPS).find(k => TAB_GROUPS[k].children.includes(which)) || null;
+}
 
 // True if the current role may see this outreach tab. Ungated tabs (no entry
 // in TAB_CAP, e.g. feedback) are always allowed.
@@ -2239,9 +2328,25 @@ function isOutreachTabPermitted(which) {
 function firstPermittedOutreachTab() {
   const tabs = document.querySelectorAll('#tabs-outreach .tab');
   for (const t of tabs) {
-    if (isOutreachTabPermitted(t.dataset.tab)) return t.dataset.tab;
+    if (t.dataset.group) {
+      const child = TAB_GROUPS[t.dataset.group]?.children.find(c => isOutreachTabPermitted(c));
+      if (child) return child;       // land on the first permitted sub-tab of this group
+      continue;                      // none permitted -> skip the parent
+    }
+    if (t.dataset.tab && isOutreachTabPermitted(t.dataset.tab)) return t.dataset.tab;
   }
   return 'submit'; // every role has Submit, but fall back defensively
+}
+
+// Effective active outreach queue: the active sub-tab when a parent group is
+// open, else the active top-level tab. (Parent tabs carry no data-tab.)
+function currentOutreachTab() {
+  const parentActive = document.querySelector('#tabs-outreach .tab-parent.active');
+  if (parentActive) {
+    const subnav = TAB_GROUPS[parentActive.dataset.group]?.subnav;
+    return document.querySelector(`#${subnav} .subtab.active`)?.dataset.tab || null;
+  }
+  return document.querySelector('#tabs-outreach .tab.active')?.dataset.tab || null;
 }
 
 // Per-tab work that must run when a tab becomes active.
@@ -2249,6 +2354,7 @@ function runTabSideEffects(which) {
   // Re-render the Ready tab on open so the "In queue?" column reflects any
   // drafts the cron has composed since the last refresh.
   if (which === 'ready') renderReady();
+  if (which === 'approval') renderApproval();
   if (which === 'editlog') loadEditLog();
   if (which === 'feedback') loadFeedback();
   if (typeof updateGlobalSearchScope === 'function') updateGlobalSearchScope();
@@ -2261,7 +2367,19 @@ function applyPermissions() {
   // 1) Hide non-permitted outreach tabs (the `hidden` class is the pattern
   //    already used elsewhere on tabs/panels).
   document.querySelectorAll('#tabs-outreach .tab').forEach(tab => {
-    tab.classList.toggle('hidden', !isOutreachTabPermitted(tab.dataset.tab));
+    if (tab.dataset.group) {
+      // Parent visible if the role can see ANY of its sub-tabs.
+      tab.classList.toggle('hidden',
+        !TAB_GROUPS[tab.dataset.group].children.some(c => isOutreachTabPermitted(c)));
+    } else {
+      tab.classList.toggle('hidden', !isOutreachTabPermitted(tab.dataset.tab));
+    }
+  });
+  // Gate each group's sub-tabs individually (e.g. outbound/approval share TAB_OUTBOUND).
+  Object.values(TAB_GROUPS).forEach(g => {
+    document.querySelectorAll(`#${g.subnav} .subtab`).forEach(tab => {
+      tab.classList.toggle('hidden', !isOutreachTabPermitted(tab.dataset.tab));
+    });
   });
 
   // 2) Metrics: KPI strip + the appbar "Metrics" button.
@@ -2276,7 +2394,7 @@ function applyPermissions() {
 
   // 4) If the currently-active outreach tab isn't permitted, land on the first
   //    one that is.
-  const active = document.querySelector('#tabs-outreach .tab.active')?.dataset.tab;
+  const active = currentOutreachTab();
   if (currentMode === 'outreach' && (!active || !isOutreachTabPermitted(active))) {
     activateOutreachTab(firstPermittedOutreachTab());
   }
@@ -2286,8 +2404,23 @@ function applyPermissions() {
 // switchMode/applyPermissions. Ignores tabs the role can't open.
 function activateOutreachTab(which) {
   if (!isOutreachTabPermitted(which)) return;
+  const groupKey = groupKeyForChild(which);
+  // Top-level active state: the parent when a sub-tab is active, else the tab itself.
   document.querySelectorAll('#tabs-outreach .tab').forEach(t => t.classList.remove('active'));
-  document.querySelector(`#tabs-outreach .tab[data-tab="${which}"]`)?.classList.add('active');
+  if (groupKey) {
+    document.querySelector(`#tabs-outreach .tab-parent[data-group="${groupKey}"]`)?.classList.add('active');
+  } else {
+    document.querySelector(`#tabs-outreach .tab[data-tab="${which}"]`)?.classList.add('active');
+  }
+  // Sub-navs: show only the active group's row; mark the active sub-tab within it.
+  Object.entries(TAB_GROUPS).forEach(([key, g]) => {
+    const subnav = document.getElementById(g.subnav);
+    if (!subnav) return;
+    const isActiveGroup = key === groupKey;
+    subnav.classList.toggle('hidden', !isActiveGroup);
+    subnav.querySelectorAll('.subtab').forEach(t =>
+      t.classList.toggle('active', isActiveGroup && t.dataset.tab === which));
+  });
   OUTREACH_PANELS.forEach(p => {
     document.getElementById('panel-' + p).classList.toggle('hidden', p !== which);
   });
@@ -2317,16 +2450,25 @@ function applyOutboundRevenuePermission() {
 // =====================================================================
 document.querySelectorAll('#tabs-outreach .tab').forEach(tab => {
   tab.addEventListener('click', () => {
+    // A parent tab has no panel of its own — open its first permitted sub-tab.
+    if (tab.dataset.group) {
+      const child = TAB_GROUPS[tab.dataset.group]?.children.find(c => isOutreachTabPermitted(c));
+      if (child) activateOutreachTab(child);
+      return;
+    }
     const which = tab.dataset.tab;
     // Guard: ignore clicks on tabs this role isn't allowed to open (covers any
     // stale DOM / keyboard path that reaches a hidden tab).
     if (!isOutreachTabPermitted(which)) return;
-    document.querySelectorAll('#tabs-outreach .tab').forEach(t => t.classList.remove('active'));
-    tab.classList.add('active');
-    OUTREACH_PANELS.forEach(p => {
-      document.getElementById('panel-' + p).classList.toggle('hidden', p !== which);
-    });
-    runTabSideEffects(which);
+    activateOutreachTab(which);
+  });
+});
+// Sub-tabs of every parent group (Pending: Outbound/Approval/Replies; Actions: Ready/Reschedule).
+document.querySelectorAll('#subtabs-pending .subtab, #subtabs-actions .subtab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    const which = tab.dataset.tab;
+    if (!isOutreachTabPermitted(which)) return;
+    activateOutreachTab(which);
   });
 });
 document.querySelectorAll('#tabs-cc .tab').forEach(tab => {
@@ -2489,6 +2631,39 @@ function pickCaseSuggestion(caseNumber) {
   lookupCase();
 }
 
+// Friendly event-type label per case_communications.source_type.
+const COMM_TYPE_LABEL = {
+  attempt: 'system email',
+  reply: 'doctor reply',
+  mailbox_scrape: 'mailbox email',
+  case_note: 'case_note',
+};
+
+// Map a case_communications row into the timeline render shape (so the existing
+// renderer, AI summary, and PDF print keep working) plus the richer medium /
+// cc_compliant fields the unified table carries.
+function _normalizeCommRow(cc) {
+  return {
+    event_id: cc.id,
+    case_number: cc.case_number,
+    event_time: cc.occurred_at,
+    event_type: COMM_TYPE_LABEL[cc.source_type] || cc.source_type || 'event',
+    status: cc.classification || null,
+    direction: cc.direction || 'internal',
+    attempt_number: null,
+    counterparty: cc.counterparty || cc.from_addr || cc.to_addr || null,
+    subject: cc.subject || null,
+    body: cc.body_text || null,
+    reason: null,
+    actor: cc.actor || null,
+    sub_status: null,
+    note: null,
+    medium: cc.medium || null,
+    channel_source: cc.channel_source || null,
+    cc_compliant: (cc.cc_compliant === undefined ? null : cc.cc_compliant),
+  };
+}
+
 async function lookupCase() {
   const cn = document.getElementById('lookup-input').value.trim();
   if (!cn) { toast('Enter a case number', 'err'); return; }
@@ -2497,10 +2672,11 @@ async function lookupCase() {
   let rows, caseInfo;
   if (inCowork) {
     rows = await runMcpSql(
-      "SELECT event_id, case_number, event_time, event_type, status, direction, " +
-      "attempt_number, counterparty, subject, body, reason, actor, sub_status, note " +
-      "FROM v_case_comms_timeline WHERE case_number = '" + cn.replace(/'/g, "''") + "' " +
-      "ORDER BY event_time DESC LIMIT 200"
+      "SELECT id, case_number, occurred_at, source_type, direction, medium, " +
+      "channel_source, cc_compliant, counterparty, from_addr, to_addr, subject, " +
+      "body_text, classification, actor " +
+      "FROM case_communications WHERE case_number = '" + cn.replace(/'/g, "''") + "' " +
+      "ORDER BY occurred_at DESC LIMIT 300"
     );
     const meta = await runMcpSql(
       `SELECT c."Case Number" AS case_number,
@@ -2520,13 +2696,19 @@ async function lookupCase() {
     );
     caseInfo = (meta && meta[0]) || null;
   } else {
-    rows = await restGet('/rest/v1/v_case_comms_timeline?case_number=eq.' +
-      encodeURIComponent(cn) + '&order=event_time.desc&limit=200');
+    rows = await restGet('/rest/v1/case_communications?case_number=eq.' +
+      encodeURIComponent(cn) + '&order=occurred_at.desc&limit=300');
     try {
       const meta = await restGet('/rest/v1/v_case_basics?case_number=eq.' + encodeURIComponent(cn) + '&limit=1');
       caseInfo = (meta && meta[0]) || null;
     } catch { caseInfo = null; }
   }
+
+  // The timeline now reads the unified case_communications table. Normalize each
+  // row into the shape the renderer/AI-summary/PDF expect, carrying the richer
+  // medium + cc_compliant fields. (Only SENT system emails appear here — unsent
+  // pending/rejected drafts are not communications.)
+  rows = (rows || []).map(_normalizeCommRow);
 
   caseLookupState.caseNumber = cn;
   caseLookupState.rows = rows || [];
@@ -2585,6 +2767,12 @@ async function lookupCase() {
     const t = r.event_time ? new Date(r.event_time) : null;
     const timeStr = t ? t.toLocaleDateString([], {timeZone:'America/Los_Angeles'}) + ' ' + t.toLocaleTimeString([], {timeZone:'America/Los_Angeles',hour:'numeric',minute:'2-digit'}) + ' PT' : '';
     const typeLabel = (r.event_type || '').replace(/_/g, ' ');
+    const mediumIcon = { phone: '📞', email: '✉️', note: '📝' }[r.medium] || '';
+    const ccChip = r.cc_compliant === false
+      ? '<span class="tl-cc-chip" style="margin-left:6px;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600;background:#fde8e8;color:#b42318;border:1px solid #f3b4b4;">⚠ not CC&#39;d</span>'
+      : (r.cc_compliant === true && r.medium === 'email')
+      ? '<span class="tl-cc-chip" style="margin-left:6px;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600;background:#e7f6ec;color:#1a7f37;border:1px solid #b7e0c4;">CC&#39;d</span>'
+      : '';
     const statusClass = (r.status || '').replace(/\s+/g, '_').toLowerCase();
     const statusChip = r.status
       ? '<span class="tl-status-chip ' + statusClass + '">' + esc(r.status) + '</span>'
@@ -2598,7 +2786,7 @@ async function lookupCase() {
     return `
       <div class="tl-event ${r.direction || 'internal'} ${statusClass}">
         <div class="tl-event-head">
-          <span><span class="type">${esc(typeLabel)}</span> ${statusChip}</span>
+          <span><span class="type">${mediumIcon ? mediumIcon + ' ' : ''}${esc(typeLabel)}</span> ${statusChip}${ccChip}</span>
           <span class="time">${esc(timeStr)}</span>
         </div>
         ${r.counterparty ? '<div class="actor">' + (r.direction === 'inbound' ? 'From' : 'To') + ': ' + esc(r.counterparty) + '</div>' : ''}
@@ -3735,8 +3923,8 @@ const TOUR_STEPS = [
     beforeShow: () => switchMode('outreach') },
 
   // Outreach
-  { title: "Click Pending Outbound", body: "Open the first tab.",
-    selector: '#tabs-outreach .tab[data-tab="outbound"]', placement: 'bottom', requireClick: true },
+  { title: "Click Pending", body: "Open the Pending group (Outbound · Approval · Replies). It opens on Pending Outbound.",
+    selector: '#tabs-outreach .tab-parent[data-group="pending"]', placement: 'bottom', requireClick: true },
   { title: "What you see here", body: "Every draft email is queued here for your review before it sends.",
     selector: '#panel-outbound', placement: 'top' },
   { title: "Pan number first", body: "Each row leads with the Pan number. Case number sits underneath in smaller text.",
@@ -3794,8 +3982,9 @@ const TOUR_STEPS = [
       if (first && !first.classList.contains('expanded')) first.classList.add('expanded');
     } },
 
-  { title: "Click Pending Replies", body: "Open the next tab.",
-    selector: '#tabs-outreach .tab[data-tab="inbound"]', placement: 'bottom', requireClick: true },
+  { title: "Click Pending Replies", body: "Switch to the Replies sub-tab.",
+    selector: '#subtabs-pending .subtab[data-tab="inbound"]', placement: 'bottom', requireClick: true,
+    beforeShow: () => { if (!document.querySelector('#tabs-outreach .tab-parent.active')) activateOutreachTab('outbound'); } },
   { title: "Suggested classification", body: "Each reply comes in with a suggested classification. Confirm or override with one click.",
     selector: '#panel-inbound', placement: 'top' },
   { title: "Five buckets", body: "Approved. Modification. Approved with Mods. Pricing Question. Other.",
@@ -3803,10 +3992,13 @@ const TOUR_STEPS = [
   { title: "Pricing routes to AM", body: "Pricing or product questions auto-route to the Account Manager.",
     selector: '#panel-inbound', placement: 'top' },
 
-  { title: "Click Reschedule", body: "Open the next tab.",
-    selector: '#tabs-outreach .tab[data-tab="reschedule"]', placement: 'bottom', requireClick: true },
+  { title: "Click Actions", body: "Open the Actions group (Ready for ABS Scan · Reschedule).",
+    selector: '#tabs-outreach .tab-parent[data-group="actions"]', placement: 'bottom', requireClick: true },
+  { title: "Click Reschedule", body: "Switch to the Reschedule sub-tab.",
+    selector: '#subtabs-actions .subtab[data-tab="reschedule"]', placement: 'bottom', requireClick: true },
   { title: "5 day window", body: "Cases that cannot make their due date given the 5 business day window and 9am PST cutoff.",
-    selector: '#panel-reschedule', placement: 'top' },
+    selector: '#panel-reschedule', placement: 'top',
+    beforeShow: () => activateOutreachTab('reschedule') },
   { title: "Export to CSV", body: "One click hands the list straight to production.",
     selector: '#panel-reschedule', placement: 'top' },
 
@@ -3822,7 +4014,7 @@ const TOUR_STEPS = [
 
   { title: "Click Audit", body: "Open the last Outreach tab.",
     selector: '#tabs-outreach .tab[data-tab="audit"]', placement: 'bottom', requireClick: true },
-  { title: "Spot patterns", body: "Approve, edit, reject rates over a selectable window. High edit rate means the template needs work.",
+  { title: "Spot patterns", body: "Approve, edit, and reject rates over a selectable window — high edit rate means the template needs work. Auto-canceled is a separate column: drafts the system retired because the case already advanced past approval or shipped in ABS.",
     selector: '#panel-audit', placement: 'top' },
 
   // Switch to CC
